@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Deskland · 夜草地</title>
+<style>html, body { margin: 0; height: 100%; background: #0c1820; }</style>
+<script>
+  const params = new URLSearchParams(location.search);
+  params.set('night', '1');
+  location.replace('meadow.html?' + params.toString());
+</script>
+</head>
+<body></body>
+</html>

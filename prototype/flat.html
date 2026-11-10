@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Deskland · 沙滩（原型）</title>
+<script>window.DESKLAND_NIGHT=new URLSearchParams(location.search).has('night');if(window.DESKLAND_NIGHT)document.documentElement.classList.add('night');</script>
 <!--
   Deskland · 扁平插画风海边主题原型 v0.4（纯 WebGL2，2D，每帧直接计算）
   画风参考：扁平色块 + 喷绘颗粒（丝网印刷感）
@@ -17,6 +18,7 @@
   :root { --taskbar: 48px; }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; overflow: hidden; background: #1aa3c4; }
+  html.night, html.night body { background: #071820; }
   body { font-family: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif; }
   #art { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
   #desktop { position: fixed; left: 0; top: 0; right: 0; bottom: var(--taskbar); }
@@ -159,12 +161,13 @@ const MORPH_MS = 1800;
 const QS = new URLSearchParams(location.search);
 const WALL = QS.has('wallpaper');      // 壁纸模式：桌面宿主加载，消息来自宿主
 const PREVIEW = QS.has('preview');     // 预览模式：设置窗口里的缩略预览（iframe），消息来自父页面
+const NIGHT = window.DESKLAND_NIGHT === true;   // 夜沙滩：同一套岸线，月光调色
 // 默认值要和 themes.json 里海边主题的 default 保持一致
 // 海浪（speed、runup、wave、spacing、waves）和 grain、quality 不再开放调节，固定为这里的值
 const P = {
   sigma: 85, warp: 34, shallow: 260, shoal: 110,
   speed: 22, runup: 120, wave: 1.6, spacing: 70, waves: 1, grain: 1, quality: 2,   // quality 2：按屏幕的实际像素画（150% 缩放时不再放大发糊）
-  kayaks: 2, birds: 3, palms: 4, debug: false, snap: true, cap30: true,
+  kayaks: 2, birds: 3, palms: 4, moonMove: 1, moonShow: 1, debug: false, snap: true, cap30: true,
 };
 const DEFAULTS = Object.assign({}, P);
 const SLIDERS = [
@@ -353,17 +356,42 @@ uniform vec4 uKay[4];          // x, y, 朝向, 划桨相位
 uniform vec4 uRip[6];
 uniform float uBirdN;
 uniform vec4 uBird[8];         // x, y, 朝向, 翅膀展开程度
+uniform float uMoonMove, uMoonShow;
 out vec4 o;
 
 // ---- 调色板（sRGB）----
+#ifdef BEACH_NIGHT
+const vec3 SEA0 = vec3(0.26, 0.40, 0.46), SEA1 = vec3(0.13, 0.30, 0.42), SEA2 = vec3(0.07, 0.20, 0.34);
+const vec3 SEA3 = vec3(0.04, 0.13, 0.26), SEA4 = vec3(0.02, 0.07, 0.16);
+const vec3 SAND0 = vec3(0.52, 0.47, 0.40), SAND1 = vec3(0.40, 0.36, 0.34), SAND2 = vec3(0.30, 0.28, 0.32), SAND3 = vec3(0.22, 0.22, 0.28);
+const vec3 FOAM = vec3(0.74, 0.82, 0.88);
+const vec3 SHORE_FOAM = vec3(0.38, 0.46, 0.54);   // 打上岛缘的碎沫，明显不是纯白
+const vec3 WETSAND = vec3(0.36, 0.32, 0.28);
+const vec3 SPARK = vec3(0.70, 0.80, 0.94);
+const vec3 BED0 = vec3(0.38, 0.34, 0.28), BED1 = vec3(0.28, 0.32, 0.30);
+const vec3 TINT0 = vec3(0.40, 0.50, 0.54), TINT1 = vec3(0.18, 0.34, 0.42);
+const vec3 KAY_SH = vec3(0.28, 0.36, 0.48);
+const vec3 FILM_TINT = vec3(0.70, 0.76, 0.82);
+const vec3 BIRD_WING = vec3(0.55, 0.62, 0.72), BIRD_TIP = vec3(0.12, 0.14, 0.18);
+const vec3 BIRD_BODY = vec3(0.78, 0.84, 0.90), BIRD_BEAK = vec3(0.70, 0.55, 0.28), BIRD_SH = vec3(0.40, 0.48, 0.60);
+#else
 // 海：近岸 → 远处
 const vec3 SEA0 = vec3(0.74, 0.93, 0.87), SEA1 = vec3(0.47, 0.87, 0.84), SEA2 = vec3(0.17, 0.76, 0.81);
 const vec3 SEA3 = vec3(0.03, 0.66, 0.79), SEA4 = vec3(0.00, 0.56, 0.73);
 // 沙：干 → 最湿（淡紫灰）
 const vec3 SAND0 = vec3(0.97, 0.93, 0.88), SAND1 = vec3(0.91, 0.85, 0.84), SAND2 = vec3(0.82, 0.76, 0.79), SAND3 = vec3(0.71, 0.67, 0.75);
 const vec3 FOAM = vec3(0.98, 0.99, 0.98);
+const vec3 SHORE_FOAM = vec3(0.98, 0.99, 0.98);
 // 湿沙：被水泡过的沙子，比干沙深一点、偏黄（岸边那一圈都往这个颜色靠）
 const vec3 WETSAND = vec3(0.93, 0.86, 0.72);
+const vec3 SPARK = vec3(0.95, 1.0, 1.0);
+const vec3 BED0 = vec3(0.97, 0.91, 0.79), BED1 = vec3(0.88, 0.90, 0.77);
+const vec3 TINT0 = vec3(0.93, 0.99, 0.96), TINT1 = vec3(0.62, 0.92, 0.88);
+const vec3 KAY_SH = vec3(0.62, 0.78, 0.84);
+const vec3 FILM_TINT = vec3(0.98, 0.96, 0.90);
+const vec3 BIRD_WING = vec3(0.80, 0.84, 0.88), BIRD_TIP = vec3(0.20, 0.22, 0.26);
+const vec3 BIRD_BODY = vec3(0.99, 0.99, 0.98), BIRD_BEAK = vec3(0.98, 0.78, 0.22), BIRD_SH = vec3(0.70, 0.74, 0.84);
+#endif
 
 float hash(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
 // 颗粒和反光点用的随机数（Dave Hoskins 的 hash12）：对整数格子坐标也足够"乱"，不会排成行列
@@ -507,14 +535,14 @@ void main() {
       float r = 0.7 + 0.9 * hash2(seedc + 3.3);
       spark = max(spark, (1.0 - ss(r * 0.5, r * 1.5, length((f - c) * cs))) * tw);
     }
-    col = mix(col, vec3(0.95, 1.0, 1.0), spark * 0.85);
+    col = mix(col, SPARK, spark * 0.85);
 
     // 透明浅滩：水浅到能看见沙底，越往外越被青绿色盖住（过渡同样用颗粒喷出来）
     float shoal = uShoal;
     float k = clamp(ss(shoal * 0.15, shoal * 1.25, s) + (g2 - 0.5) * 0.16 * gAmt, 0.0, 1.0);
     if (k < 1.0) {
-      vec3 bed = mix(vec3(0.97, 0.91, 0.79), vec3(0.88, 0.90, 0.77), ss(0.0, shoal, s));
-      vec3 tint = mix(vec3(0.93, 0.99, 0.96), vec3(0.62, 0.92, 0.88), ss(0.0, shoal * 0.9, s));
+      vec3 bed = mix(BED0, BED1, ss(0.0, shoal, s));
+      vec3 tint = mix(TINT0, TINT1, ss(0.0, shoal * 0.9, s));
       col = mix(bed * tint, col, k);
     }
     // 贴岸的一段水底是湿沙：从岸线处的湿沙色慢慢过渡到浅滩的沙底色，和沙滩那边接得上，水里没有一道边
@@ -530,7 +558,7 @@ void main() {
       vec2 pd = paddleSD(q2, k.w);
       shadow = max(shadow, ss(1.6, -1.6, min(sd, min(pd.x, pd.y))));
     }
-    col = mix(col, col * vec3(0.62, 0.78, 0.84), shadow * 0.7);
+    col = mix(col, col * KAY_SH, shadow * 0.7);
 
     // 涟漪：细白圈
     float rip = 0.0;
@@ -561,7 +589,7 @@ void main() {
     float burst = exp(-fu * 4.5) * ss(0.0, 0.04, fu);
     float spray = exp(-dd / (6.0 * wv)) * burst * energy * 0.45;
     float foam = max(crest, step(g2, max(spray, crestSpray)));
-    col = mix(col, FOAM, foam);
+    col = mix(col, mix(SHORE_FOAM, FOAM, ss(16.0, 150.0, s)), foam);
   } else {
     // ---------- 沙滩（干沙 + 靠水的一窄条常湿带）----------
     float wet = ss(-7.0 - 3.0 * shoreE, 1.0, s) * 0.2;
@@ -603,18 +631,18 @@ void main() {
     // 冲上来的薄水：几层重叠的地方只算最厚的那层（一层层相乘会越叠越暗）。
     // 被水盖住的沙子变成偏黄的湿沙色（一部分相乘、保留下面沙子的颗粒；一部分直接往湿沙色靠）。
     // 不能乘青绿：偏粉的沙子乘上青绿会互相抵消成灰色，岸边一圈发暗
-    col = mix(col, mix(col * vec3(0.98, 0.96, 0.90), FILM, 0.6), filmA * wk);
+    col = mix(col, mix(col * FILM_TINT, FILM, 0.6), filmA * wk);
     // 由老到新画薄水层的碎沫和白边
     for (int j = 2; j >= 0; j--) {
       float front = layers[j].x, a = layers[j].y, amp = layers[j].z;
       float cov = ss(front - 1.0, front + layers[j].w, sW);
       float lace = laceNet * cov * ss(0.4, 0.6, a) * (1.0 - ss(0.7, 1.4, a)) * wk;
-      col = mix(col, FOAM, lace * 0.75);
+      col = mix(col, SHORE_FOAM, lace * 0.75);
       float edgeK = a < 0.45 ? 1.0 : 1.0 - ss(0.45, 1.05, a);
       float d = sW - front;
       float lineE = (1.0 - ss(0.8 * wv, 1.9 * wv, abs(d - 0.9 * wv))) * edgeK * onSand;    // 前沿白边
       float sprayE = exp(-max(d, 0.0) / (5.0 * wv)) * cov * edgeK * 0.5 * onSand;         // 白边身后的颗粒水雾
-      col = mix(col, FOAM, max(lineE * 0.95, step(g1, sprayE)));
+      col = mix(col, SHORE_FOAM, max(lineE * 0.95, step(g1, sprayE)));
     }
   }
 
@@ -651,6 +679,13 @@ void main() {
     float sh = ss(0.5, -0.5, pd.x), bl = ss(0.5, -0.5, pd.y);
     kc = mix(kc, vec3(0.28, 0.24, 0.26), sh);
     kc = mix(kc, vec3(0.90, 0.28, 0.22), bl);
+#ifdef BEACH_NIGHT
+    float cover = max(max(mh, body), max(head, max(sh, bl)));
+    if (cover > 0.0) {
+      float ky = dot(kc, vec3(0.30, 0.59, 0.11));
+      kc = mix(kc, mix(vec3(ky), kc, 0.75) * vec3(0.72, 0.80, 0.96), cover);
+    }
+#endif
     col = kc;
   }
 
@@ -661,17 +696,42 @@ void main() {
     vec2 d0 = p - b.xy, d1 = d0 - vec2(34.0, 55.0);
     if (dot(d1, d1) < 400.0) {
       vec3 g = gullSD(rot(-b.z) * d1, b.w);
-      col = mix(col, col * vec3(0.70, 0.74, 0.84), ss(1.8, -1.8, min(g.x, g.y)) * 0.28);
+      col = mix(col, col * BIRD_SH, ss(1.8, -1.8, min(g.x, g.y)) * 0.28);
     }
     if (dot(d0, d0) < 400.0) {
       vec3 g = gullSD(rot(-b.z) * d0, b.w);
-      vec3 wingC = mix(vec3(0.80, 0.84, 0.88), vec3(0.20, 0.22, 0.26), ss(0.72, 0.8, g.z));
+      vec3 wingC = mix(BIRD_WING, BIRD_TIP, ss(0.72, 0.8, g.z));
       col = mix(col, wingC, ss(0.6, -0.6, g.y));
-      col = mix(col, vec3(0.99, 0.99, 0.98), ss(0.6, -0.6, g.x));
-      col = mix(col, vec3(0.98, 0.78, 0.22), ss(0.5, -0.5, length(rot(-b.z) * d0 - vec2(7.2, 0.0)) - 0.9));   // 黄嘴
+      col = mix(col, BIRD_BODY, ss(0.6, -0.6, g.x));
+      col = mix(col, BIRD_BEAK, ss(0.5, -0.5, length(rot(-b.z) * d0 - vec2(7.2, 0.0)) - 0.9));   // 黄嘴
     }
   }
 
+#ifdef BEACH_NIGHT
+  // 月亮只出现在水上。停住时回到右上角原来的位置。移动时走一条很宽、很慢的拱。
+  if (uMoonShow > 0.5) {
+    float trip = mod(uTime, 180.0) / 90.0;
+    float travel = trip < 1.0 ? trip : 2.0 - trip;
+    float lift = sin(travel * 3.14159265);
+    vec2 moonC = uMoonMove > 0.5
+      ? vec2(mix(0.07, 0.93, travel) * uRes.x, mix(0.42, 0.05, lift) * uRes.y)
+      : vec2(uRes.x * 0.78, uRes.y * 0.14);
+    float moonShore = mix(fieldS(uFA, moonC), fieldS(uFB, moonC), uMix);
+    if (moonShore > 2.0) {
+      float moonD = length(p - moonC);
+      float onWater = step(2.0, s0);
+      float wash = exp(-moonD * moonD / (860.0 * 860.0)) * onWater;
+      col += vec3(0.035, 0.055, 0.08) * wash;
+      col = mix(col, col * (1.0 + 0.14 * wash), onWater);
+      float moonDisc = 1.0 - ss(20.0, 26.0, moonD);
+      float maria = ss(0.35, 0.75, hash2(floor((p - moonC) * 0.4)));
+      vec3 moonCol = mix(vec3(0.90, 0.93, 0.86), vec3(0.70, 0.75, 0.70), maria * 0.55);
+      moonCol = mix(moonCol, vec3(0.78, 0.84, 0.90), ss(12.0, 25.0, moonD));
+      col = mix(col, moonCol, moonDisc * onWater);
+      col += vec3(0.22, 0.30, 0.38) * exp(-moonD * moonD / (64.0 * 64.0)) * (1.0 - moonDisc) * onWater;
+    }
+  }
+#endif
   if (uDebug > 0.5) col = mix(col, vec3(0.9, 0.15, 0.15), 1.0 - ss(0.0, 1.5, abs(s0)));
   // 印刷感：整体再叠一层极轻的颗粒
   col *= 1.0 + (g2 - 0.5) * 0.035 * gAmt;
@@ -701,8 +761,12 @@ function program(fs, vs = VS) {
   for (let i = 0; i < n; i++) { const nm = gl.getActiveUniform(p, i).name.replace(/\[0\]$/, ''); U[nm] = gl.getUniformLocation(p, nm); }
   return { p, U };
 }
-const PR = program(FS);
-const palmPR = program(FS.slice(0, FS.indexOf('void main() {')) + BEACH_PALM_FS, BEACH_PALM_VS);
+function themeFS() {
+  return NIGHT ? FS.replace('#version 300 es', '#version 300 es\n#define BEACH_NIGHT') : FS;
+}
+const PR = program(themeFS());
+const beachFS = themeFS();
+const palmPR = program(beachFS.slice(0, beachFS.indexOf('void main() {')) + BEACH_PALM_FS, BEACH_PALM_VS);
 gl.bindVertexArray(gl.createVertexArray());
 
 let noiseTex = null;
@@ -1092,6 +1156,8 @@ function configureBeachPass(now, pass) {
   gl.uniform4fv(U.uKay, kayBuf);
   gl.uniform4fv(U.uRip, ripBuf);
   gl.uniform1f(U.uBirdN, birds.length); gl.uniform4fv(U.uBird, birdBuf);
+  if (U.uMoonMove) gl.uniform1f(U.uMoonMove, P.moonMove);
+  if (U.uMoonShow) gl.uniform1f(U.uMoonShow, P.moonShow);
 }
 
 /* ======================================================================
@@ -1220,6 +1286,11 @@ function applySettings(v) {
   // 只接受面板上有的参数：已经去掉的选项（颗粒感、渲染精度）即使旧的设置文件里还存着也不生效
   let field = false, kay = false, bird = false;
   for (const k in v) {
+    if (k === 'moonMove' || k === 'moonShow') {
+      if ((v[k] !== 0 && v[k] !== 1) || P[k] === v[k]) continue;
+      P[k] = v[k];
+      continue;
+    }
     if (!SLIDERS.some(s => s.key === k) || typeof v[k] !== typeof P[k] || P[k] === v[k]) continue;
     P[k] = k === 'palms' ? Math.max(0, Math.min(10, Math.round(Number.isFinite(v[k]) ? v[k] : DEFAULTS.palms))) : v[k];
     if (k === 'sigma' || k === 'warp') field = true;

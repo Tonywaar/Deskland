@@ -42,7 +42,12 @@ void main() {
     if (dot(q, q) < 400.0) {vec3 bird = gullSD(q, b.w);if (min(bird.x, bird.y) < .6) discard;}
   }
   float alpha = tree.a * uPalmOpacity;
-  o = vec4(tree.rgb * alpha, alpha);
+  vec3 rgb = tree.rgb;
+#ifdef BEACH_NIGHT
+  float py = dot(rgb, vec3(0.30, 0.59, 0.11));
+  rgb = mix(vec3(py), rgb, 0.55) * vec3(0.55, 0.70, 0.88) + vec3(0.015, 0.02, 0.04);
+#endif
+  o = vec4(rgb * alpha, alpha);
 }`;
 
 function makeMaldivesPalmAtlas() {
