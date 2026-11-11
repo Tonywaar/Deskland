@@ -4,7 +4,9 @@ Scanned 2026-11-11 from this Preview repo. Use this before adding a theme.
 
 Deskland is a Windows adaptive wallpaper. A WebView2 window sits under the real desktop icons. The theme page paints scenery that reshapes when icons move. No AI, no account, no network at runtime.
 
-This repo is **Deskland Preview**. It ships two complete themes (beach, meadow) plus 11 locked catalog entries (name, description, thumbnail only). Do not add page, parameters, or implementation for those locked ids.
+This repo is **Deskland Preview**. The app UI, comments, and docs are English only. There is no zh-CN locale. Strings in `themes.json` are English.
+
+Free ready themes: `beach`, `meadow`, `meadow-night`, `beach-night`, `worldmap`, `worldmap-dark`, `forest`, and `forest-night`. Locked catalog entries stay in `themes.json` with no `page` and no `groups`, and the settings list does not show them.
 
 ## Layout
 
@@ -12,18 +14,19 @@ This repo is **Deskland Preview**. It ships two complete themes (beach, meadow) 
 | --- | --- |
 | `host/DesktopHost.cs` | Tray, wallpaper window, icon poll, pause, settings save, share |
 | `host/Themes.cs` | Loads `themes.json`; only `status: "ready"` plus `product: "free"` may run |
-| `prototype/themes.json` | Theme catalog. Settings UI is generated from this file |
+| `prototype/themes.json` | Theme catalog. Settings UI is generated from this file. Display strings are English |
 | `prototype/flat.html` | Beach theme (complete). `?night=1` is the night palette |
-| `prototype/beach-night.html` | Redirects to `flat.html` with `night=1`, keeping `wallpaper` or `preview` |
+| `prototype/beach-night.html` | Night Beach. Redirects to `flat.html` with `night=1`, keeping `wallpaper` or `preview` |
 | `prototype/meadow.html` | Meadow theme (complete). `?night=1` is the night palette |
-| `prototype/meadow-night.html` | Redirects to `meadow.html` with `night=1`, keeping `wallpaper` or `preview` |
+| `prototype/meadow-night.html` | Night Meadow. Redirects to `meadow.html` with `night=1`, keeping `wallpaper` or `preview` |
+| `prototype/worldmap.html` | Old Map (free, ready) |
+| `prototype/forest.html` | Forest (free, ready) |
 | `prototype/beach-palms.js` | Beach palms, local layer |
 | `prototype/meadow-boy.js` | Boy + kite, local textures |
 | `prototype/meadow-cat.js` | Cat, scissor-limited redraw |
 | `prototype/settings.html` | Settings UI and live preview iframe |
 | `prototype/share.js` | Privacy share. Loaded at the end of every theme page |
-| `prototype/i18n/en.json` | English UI and English theme strings |
-| `prototype/i18n/zh-CN.json` | Chinese UI. Chinese theme strings stay in `themes.json` |
+| `prototype/i18n/en.json` | English UI strings. No zh-CN locale |
 | `prototype/serve.mjs` | Browser preview on port 5178 |
 | `prototype/thumbs/` | Hand-made thumbnails. Do not regenerate or overwrite |
 
@@ -38,7 +41,7 @@ Product display name is `Deskland Preview`. Data lives in `%LOCALAPPDATA%\Deskla
 5. Z-order stays just below the icon list. System wallpaper WorkerW is pushed to the bottom.
 6. Icon positions are polled every 400 ms. A message is sent only when the JSON changes.
 7. Foreground is polled every 500 ms. Maximized or fullscreen windows pause the wallpaper. Own window, invisible windows, and cloaked windows do not.
-8. HTML/JS edits do not need a host rebuild. Tray **重新载入** reloads the page. C# edits need `powershell -ExecutionPolicy Bypass -File host\build.ps1`.
+8. HTML/JS edits do not need a host rebuild. Tray **Reload** reloads the page. C# edits need `powershell -ExecutionPolicy Bypass -File host\build.ps1`.
 
 Browser preview: `node prototype/serve.mjs`, then `http://localhost:5178/settings.html`. Sample icons only. Real icon positions need the host.
 
@@ -62,8 +65,8 @@ Free theme shape (meadow is the fuller example):
 {
   "id": "meadow",
   "adaptive": true,
-  "name": "草地",
-  "desc": "…",
+  "name": "Meadow",
+  "desc": "A pen-and-wash meadow where your icons hide in white clouds that cast dark green shadows",
   "page": "meadow.html",
   "status": "ready",
   "product": "free",
@@ -71,11 +74,11 @@ Free theme shape (meadow is the fuller example):
   "thumbSource": "custom",
   "groups": [
     {
-      "name": "云",
+      "name": "Clouds",
       "params": [
         {
           "key": "cover",
-          "label": "草地上的云",
+          "label": "Clouds over the meadow",
           "hint": "…",
           "min": 0,
           "max": 1,
@@ -92,20 +95,44 @@ Free theme shape (meadow is the fuller example):
 Rules:
 
 - `id` is the settings key. Saved under `settings.json` → `params[id]`.
-- `name`, `desc`, group `name`, and param `label` / `hint` / `options` / `unit` are Simplified Chinese. They are the zh-CN source of truth.
-- English copies go in `prototype/i18n/en.json` under `themes.<id>` with `name`, `desc`, `groups` (array aligned by index), and `params.<key>` (`label`, `hint`, `unit`, `options`).
+- `name`, `desc`, group `name`, and param `label` / `hint` / `options` / `unit` are English. `themes.json` is the source of truth. There is no zh-CN locale.
+- UI chrome strings live in `prototype/i18n/en.json`. Do not add `zh-CN.json` or any other locale.
 - `adaptive: true` shows the settings toggle that sends `adaptive` as `0` or `1`. Omit it if the theme has no such switch. Meadow has it. Beach does not.
 - Slider param: `key`, `label`, `min`, `max`, `step`, `default`, optional `hint`, `unit`, `format`.
 - `format`: `"percent"` prints `Math.round(v * 100) + '%'`. `"times"` prints `×` plus two decimals. Otherwise integer step prints a rounded number, fractional step prints two decimals, then optional `unit`.
 - Choice param: `options` is a string array. `default` is the index (`0` or `1` in meadow). Settings sends that index.
-- `seed` is not listed in `groups`. Settings injects it on first select and on 刷新. The page must honor `settings.v.seed`.
+- `seed` is not listed in `groups`. Settings injects it on first select and on Refresh. The page must honor `settings.v.seed`.
 - Defaults in the page `P` object must match `themes.json` defaults. Comment in both theme pages says this explicitly.
 - Internal knobs (beach `speed`, `runup`, `wave`, `grain`, `quality`; meadow `warp`, `edge`, `grain`, `quality`) may live in `P` and stay off the public groups.
 - `thumb` is a CSS `background` value: custom webp first, gradient fallback second. Settings also extracts the `url(...)` into a real `<img>`. Do not replace files in `prototype/thumbs/`.
 
+## Old Map (`worldmap`)
+
+Free and ready. Page `worldmap.html`. Same parchment map as the [worldmap prototype](https://deskland.app/demo/worldmap).
+
+- Icons become sea.
+- Towns are linked by dotted roads.
+- Wagons and ships travel on the map.
+- Public params:
+  - `sigma`: sea size, 50–200, default 80
+  - `ships`: 0–3, default 2
+  - `wagons`: 0–8, default 5
+
+## Forest (`forest`)
+
+Free and ready. Page `forest.html`. Same gouache woods as the [forest prototype](https://deskland.app/demo/forest).
+
+- Icons sit in a clearing.
+- Pines, round crowns, and shrubs fill the rest and sway in the wind.
+- Birds perch on treetops and sometimes fly to a nearby tree.
+- Public params:
+  - `sigma`: clearing size, 40–200, default 85
+  - `wind`: 0–3, default 1
+  - `birds`: 0–12, default 5
+
 ## Page modes
 
-Both themes read the query string the same way:
+Beach and Meadow read the query string the same way. Night Beach and Night Meadow redirect onto those pages with `night=1`.
 
 - no flag: standalone prototype. Fake desktop, taskbar, debug panel, draggable sample icons.
 - `?wallpaper=1`: host. Add class `wall`. Hide panel, taskbar, fake desktop. Real icons stay Windows-drawn.
@@ -140,9 +167,9 @@ Host / parent → theme, JSON strings:
 | `snapshot` | none | From host via `share.js`. Reply `snapshot\|thumbDataUrl\|pngDataUrl` or `snapshot\|error\|message` |
 | `record` | none | From host via `share.js`. Progress `recprogress\|0.00`. Done `record\|mime\|poster\|video` |
 
-Order after `ready`: settings first, then icons, then pause. Shore / cloud radius must use the settings values before the first field build. Both themes `commit(true)` once before any icons so the first scene exists, then morph in when icons arrive.
+Order after `ready`: settings first, then icons, then pause. Shore / cloud radius must use the settings values before the first field build. Beach and Meadow call `commit(true)` once before any icons so the first scene exists, then morph in when icons arrive.
 
-Icon conversion used by both pages:
+Icon conversion used by Beach and Meadow:
 
 ```js
 const k = window.devicePixelRatio || 1;
@@ -161,7 +188,7 @@ Settings → host (for orientation, not implemented inside the theme page):
 
 `applySettings` must ignore unknown keys and reject type mismatches against `P`. Old settings files may still contain removed keys (`grain`, `quality`).
 
-## Rendering pattern both themes share
+## Rendering pattern Beach and Meadow share
 
 - One fullscreen canvas `#art`. WebGL2. A single triangle covers the view.
 - `cv` is the canvas. `draw(now)` paints one frame. `W`, `H` are CSS pixel viewport size.
@@ -204,31 +231,31 @@ After a theme change, check icon motion, preview, pause, and share.
 
 1. New page `prototype/<id>.html`. Copy the host bridge from `flat.html` or `meadow.html` (`WALL`, `PREVIEW`, `startHostedMode`, ghosts, `applySettings`, canvas sizing, `cap30`, pause).
 2. Keep `P` defaults identical to `themes.json`.
-3. Add the theme object: `id`, `page`, `status: "ready"`, `product: "free"`, Chinese `name` / `desc` / `groups`, thumb CSS. Set `adaptive: true` only if the page honors `P.adaptive`.
-4. Add matching English strings in `prototype/i18n/en.json` → `themes.<id>`.
+3. Add the theme object: `id`, `page`, `status: "ready"`, `product: "free"`, English `name` / `desc` / `groups`, thumb CSS. Set `adaptive: true` only if the page honors `P.adaptive`.
+4. Keep those strings English in `themes.json`. Do not add a zh-CN locale.
 5. Load `share.js`. Keep `cv`, `draw`, `icons`, `W`, `H`, `WALL`, `paused`.
 6. First icon message must complete the scene even if `pause` is already true.
 7. Field / layout work happens when icons or field params change. Animate the cheap part every frame.
-8. Do not invent implementation for locked ids (`beach-turquoise`, `lake`, `sky`, `ocean`, `forest`, `pinkforest`, `map`, `citymap`, `worldmap`, `nauticalmap`, `lotus`). Their English param copy in `en.json` is catalog text only.
+8. Do not invent implementation for locked ids (`beach-turquoise`, `lake`, `sky`, `ocean`, `pinkforest`, `map`, `citymap`, `nauticalmap`, `lotus`). They have no `page` and no `groups`.
 9. Do not touch `prototype/thumbs/` unless asked.
 10. Verify in the browser (`settings.html` preview: change params, reseed, switch theme) and, if the host is running, tray reload: move icons, pause, share.
 
 ## Locked catalog (display only)
 
-| id | Chinese name |
+Name, description, and thumbnail only. No `page`. No `groups`.
+
+| id | Name |
 | --- | --- |
-| beach-turquoise | 马尔代夫 |
-| lake | 湖泊 |
-| sky | 天空 |
-| ocean | 大海 |
-| forest | 森林 |
-| pinkforest | 粉色森林 |
-| map | 手绘城市 |
-| citymap | 彩色城市 |
-| worldmap | 老地图 |
-| nauticalmap | 航海地图 |
-| lotus | 荷塘 |
+| beach-turquoise | Maldives |
+| lake | Lake |
+| sky | Sky |
+| ocean | Ocean |
+| pinkforest | Pink Forest |
+| map | Hand-drawn City |
+| citymap | Colorful City |
+| nauticalmap | Nautical Chart |
+| lotus | Lotus Pond |
 
 ## Out of scope for a theme page
 
-Account login, purchase restore, update checks, extra languages, installer identity, host wallpaper attachment. Theme work stays in `prototype/` plus `themes.json` and `en.json`.
+Account login, purchase restore, update checks, extra languages, installer identity, host wallpaper attachment. Theme work stays in `prototype/` plus `themes.json`. UI strings stay in `prototype/i18n/en.json`. There is no zh-CN locale.

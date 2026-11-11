@@ -17,8 +17,18 @@ if (-not $NsisCompiler) {
     $nsisArchive = Join-Path $cache 'nsis-3.13.zip'
     $NsisCompiler = Join-Path $cache 'nsis-3.13\makensis.exe'
     if (-not (Test-Path -LiteralPath $NsisCompiler)) {
-        Invoke-WebRequest 'https://downloads.sourceforge.net/project/nsis/NSIS%203/3.13/nsis-3.13.zip' -OutFile $nsisArchive -UseBasicParsing
-        if ((Get-FileHash -LiteralPath $nsisArchive -Algorithm SHA256).Hash -ne 'BA63DFFC4410EE89193E1CB5A41989991BD77C61068DA17E3156D136B7B0B3D8') { throw 'NSIS archive checksum mismatch' }
+        $expectedNsis = 'BA63DFFC4410EE89193E1CB5A41989991BD77C61068DA17E3156D136B7B0B3D8'
+        $cachedNsis = (Test-Path -LiteralPath $nsisArchive) -and (Get-FileHash -LiteralPath $nsisArchive -Algorithm SHA256).Hash -eq $expectedNsis
+        if (-not $cachedNsis) {
+            if (Test-Path -LiteralPath $nsisArchive) { Remove-Item -LiteralPath $nsisArchive -Force }
+            # SourceForge serves an HTML interstitial unless the client looks like a downloader.
+            & curl.exe -fL --retry 3 -A 'Wget/1.21' -o $nsisArchive 'https://downloads.sourceforge.net/project/nsis/NSIS%203/3.13/nsis-3.13.zip'
+            if ($LASTEXITCODE -ne 0) { throw 'NSIS download failed' }
+            if ((Get-FileHash -LiteralPath $nsisArchive -Algorithm SHA256).Hash -ne $expectedNsis) {
+                Remove-Item -LiteralPath $nsisArchive -Force
+                throw 'NSIS archive checksum mismatch'
+            }
+        }
         Expand-Archive -LiteralPath $nsisArchive -DestinationPath $cache -Force
     }
 }
@@ -38,22 +48,25 @@ $WebView2Bootstrapper = [IO.Path]::GetFullPath($WebView2Bootstrapper)
 $sources = @('.gitattributes', '.gitignore', 'AGENTS.md', 'LICENSE', 'NOTICE', 'README.md', 'THIRD_PARTY_NOTICES.md', 'TRADEMARKS.md',
     'host\DesktopHost.cs', 'host\DesklandPreview.ico', 'host\README.md', 'host\app.manifest', 'host\build.ps1', 'host\inspect.ps1',
     'tools\build-installer.ps1', 'tools\installer.nsi', 'tools\version.json')
-$themeFiles = @('flat.html', 'meadow.html', 'settings.html', 'thumbs-data.js', 'share.js', 'serve.mjs', 'themes.json', 'beach-palms.js', 'meadow-boy.js', 'meadow-cat.js',
-    'i18n\en.json', 'i18n\zh-CN.json', 'thumbs\beach.webp', 'thumbs\meadow.webp',
+$themeFiles = @('flat.html', 'meadow.html', 'beach-night.html', 'meadow-night.html', 'worldmap.html', 'worldmap.js', 'worldmap-rivers.js', 'worldmap-trade.js', 'worldmap-dark.html', 'forest.html', 'forest.js', 'forest-night.html', 'settings.html', 'thumbs-data.js', 'share.js', 'serve.mjs', 'themes.json', 'beach-palms.js', 'meadow-boy.js', 'meadow-cat.js',
+    'i18n\en.json', 'thumbs\beach.webp', 'thumbs\meadow.webp',
     'assets\beach-coconut-palm-v2.png', 'assets\beach-coconut-palm-curved.png', 'assets\beach-coconut-palm-airy.png', 'assets\beach-coconut-palm-windswept.png', 'assets\beach-coconut-palm-arch.png',
     'assets\meadow-black-kitten.png', 'assets\meadow-kite-boy-level-face.png', 'assets\meadow-kite-boy-diagonal-run.png')
 $themes = (Get-Content -LiteralPath (Join-Path $root 'prototype\themes.json') -Raw -Encoding UTF8 | ConvertFrom-Json).themes
 $ready = @($themes | Where-Object { $_.status -eq 'ready' })
 $locked = @($themes | Where-Object { $_.locked -eq $true })
-if ($themes.Count -ne 13 -or $ready.Count -ne 2 -or $locked.Count -ne 11 -or (($ready.id | Sort-Object) -join ',' -ne 'beach,meadow')) {
-    throw 'Expected two usable themes and eleven locked preview cards'
+if ($themes.Count -ne 17 -or $ready.Count -ne 8 -or $locked.Count -ne 9 -or (($ready.id | Sort-Object) -join ',' -ne 'beach,beach-night,forest,forest-night,meadow,meadow-night,worldmap,worldmap-dark')) {
+    throw 'Expected eight usable themes and nine locked preview cards'
 }
 foreach ($theme in $locked) {
     if ($theme.page -or $theme.groups) { throw 'Locked themes must not contain page source or settings' }
 }
 foreach ($theme in $themes) {
     $match = [regex]::Match([string]$theme.thumb, 'url\(thumbs/([^\)?]+)')
-    if (-not $match.Success) { throw 'Missing thumbnail URL: ' + $theme.id }
+    if (-not $match.Success) {
+        if ($theme.status -eq 'ready' -and -not $theme.locked) { continue }
+        throw 'Missing thumbnail URL: ' + $theme.id
+    }
     $thumbName = [uri]::UnescapeDataString($match.Groups[1].Value)
     if ($thumbName -notmatch '^[^\\/]+\.webp$') { throw 'Unexpected thumbnail path: ' + $thumbName }
     $thumbFile = 'thumbs\' + $thumbName

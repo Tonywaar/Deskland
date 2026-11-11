@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Deskland · Dark Map</title>
+<style>html, body { margin: 0; height: 100%; background: #12100c; }</style>
+<script>
+  const params = new URLSearchParams(location.search);
+  params.set('dark', '1');
+  location.replace('worldmap.html?' + params.toString());
+</script>
+</head>
+<body></body>
+</html>

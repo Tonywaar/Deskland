@@ -104,7 +104,7 @@
     "comingSoon": "Coming soon:",
     "purchaseTitle": "Get the Wallpaper edition",
     "purchaseTheme": "“{name}” is included in the Wallpaper edition.",
-    "purchaseMessage": "The preview includes Beach and Meadow forever. Get the Wallpaper edition to unlock more themes in the same Deskland app.",
+    "purchaseMessage": "The preview includes Beach, Night Beach, Meadow, Night Meadow, Forest, Night Forest, Old Map, and Dark Map.",
     "purchaseLater": "Keep exploring",
     "purchaseWebsite": "Visit website"
   },
@@ -540,6 +540,30 @@
         }
       }
     },
+    "forest-night": {
+      "name": "Night Forest",
+      "desc": "The same gouache woods at night, darker and cooler, with no moon in the sky",
+      "groups": [
+        "Around icons",
+        "Trees",
+        "Details"
+      ],
+      "params": {
+        "sigma": {
+          "label": "Clearing size",
+          "hint": "How big the clearing around your icons is, and how far away the trees stand"
+        },
+        "wind": {
+          "label": "Wind",
+          "hint": "How much the treetops sway; 0 means no wind"
+        },
+        "birds": {
+          "label": "Birds",
+          "hint": "Mostly perched on treetops, now and then flying to a nearby tree — they stay in the woods",
+          "unit": ""
+        }
+      }
+    },
     "pinkforest": {
       "name": "Pink Forest",
       "desc": "A watercolor forest: translucent pink treetops on fine ink trunks",
@@ -599,6 +623,30 @@
     "worldmap": {
       "name": "Old Map",
       "desc": "A parchment continent: icons become seas, dotted roads link towns, and horse-drawn wagons carry supplies between them",
+      "groups": [
+        "Around icons",
+        "Details"
+      ],
+      "params": {
+        "sigma": {
+          "label": "Sea size",
+          "hint": "How much sea surrounds your icons"
+        },
+        "ships": {
+          "label": "Sailing ships",
+          "hint": "Three-masted ships bobbing on the sea",
+          "unit": ""
+        },
+        "wagons": {
+          "label": "Trade wagons",
+          "hint": "Wagons carry crates and grain sacks between towns; set to 0 to hide them",
+          "unit": ""
+        }
+      }
+    },
+    "worldmap-dark": {
+      "name": "Dark Map",
+      "desc": "The same parchment chart in the dark: pale ink on near-black paper, with no moon",
       "groups": [
         "Around icons",
         "Details"

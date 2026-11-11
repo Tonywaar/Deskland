@@ -1,0 +1,125 @@
+// 老地图的静态树状水系。中心线、宽度和两岸只在地形改变时规划。
+function planContinentRivers(w,occ,sea,land) {
+  const riv=makeOcc(),step=3.5;
+  const gradient=(x,y)=>[sea(x+6,y)-sea(x-6,y),sea(x,y+6)-sea(x,y-6)];
+  const nearest=(x,y)=>{
+    let best=null,distance=Infinity;
+    for(const river of w.rivers)for(let i=0;i<river.length;i++){
+      const p=river[i],d=Math.hypot(p[0]-x,p[1]-y);
+      if(d<distance){distance=d;best={river,index:i,x:p[0],y:p[1],distance:d};}
+    }
+    return best;
+  };
+  const trace=(x,y,dx,dy,salt,skip)=>{
+    const points=[[x,y]];
+    for(let i=0;i<650;i++){
+      const [gx,gy]=gradient(x,y),length=Math.hypot(gx,gy);
+      const bx=length>.05?-gx/length:dx,by=length>.05?-gy/length:dy;
+      const angle=Math.atan2(by,bx)+(fbm(x*.012,y*.012,salt)-.48)*6.2+(fbm(x*.031,y*.031,salt+1)-.5)*1.4;
+      let nx=dx*.64+Math.cos(angle)*.36,ny=dy*.64+Math.sin(angle)*.36;
+      if(nx*bx+ny*by<.18){nx+=bx*.5;ny+=by*.5;}
+      const norm=Math.hypot(nx,ny)||1;dx=nx/norm;dy=ny/norm;
+      x+=dx*step;y+=dy*step;points.push([x,y]);
+      if(sTarget(x,y)<-20||x<-8||y<-8||x>W+8||y>H+8)return points;
+      if(i>skip&&riv.at(x,y)){
+        const join=nearest(x,y);if(!join)return null;
+        points.push([join.x,join.y]);points.parent=join.river;points.joinIndex=join.index;return points;
+      }
+      if(i>skip&&occ.at(x,y))return null;
+    }
+    return null;
+  };
+  const mark=river=>{for(const [x,y] of river)riv.mark(x-4,y-4,x+4,y+4);};
+  const roots=Math.max(2,Math.min(7,Math.round(land/370000))),sources=[];
+  for(const lake of w.lakes){
+    const [gx,gy]=gradient(lake.x,lake.y),length=Math.hypot(gx,gy)||1;
+    sources.push([lake.x-gx/length*(lake.r+3),lake.y-gy/length*(lake.r*.7+3),-gx/length,-gy/length,Math.ceil(lake.r/step)+4,2]);
+  }
+  for(let y=55;y<H-TASKBAR-30;y+=54)for(let x=55;x<W-50;x+=54){
+    const px=x+(rnd1(x,y,531)-.5)*42,py=y+(rnd1(x,y,532)-.5)*42;
+    if(sea(px,py)<155||rnd1(x,y,533)>.65)continue;
+    const [gx,gy]=gradient(px,py),length=Math.hypot(gx,gy)||1;
+    sources.push([px,py,-gx/length,-gy/length,0,rnd1(x,y,536)]);
+  }
+  while(sources.length&&w.rivers.length<roots){
+    let index=0,best=-Infinity;
+    for(let i=0;i<sources.length;i++){
+      const s=sources[i],separation=w.rivers.length?Math.min(...w.rivers.map(r=>Math.hypot(s[0]-r[0][0],s[1]-r[0][1]))):300;
+      const score=Math.min(separation,450)+sea(s[0],s[1])*.6+mtnMask(s[0],s[1])*75+s[5]*140;
+      if(score>best){best=score;index=i;}
+    }
+    const [x,y,dx,dy,skip]=sources.splice(index,1)[0];
+    if(!skip&&(occ.any(x-22,y-22,x+22,y+22)||riv.any(x-75,y-75,x+75,y+75)))continue;
+    const points=trace(x,y,dx,dy,540+w.rivers.length*13,skip);
+    if(!points||points.length<35)continue;
+    setContinentRiverWidths(points,Math.min(4.2,(9+Math.sqrt(points.length*step)*.27)*.33));
+    w.rivers.push(points);mark(points);
+  }
+  const mainRivers=w.rivers.slice().sort((a,b)=>b.totalLength-a.totalLength);
+  for(let ri=0;ri<mainRivers.length;ri++){
+    const parent=mainRivers[ri],joins=[],want=parent.totalLength>380?4:3;
+    for(let attempt=0;attempt<32&&joins.length<want;attempt++){
+      const u=q=>rnd1(ri,attempt,570+q),fraction=.25+u(1)*.58;
+      const index=Math.max(3,Math.min(parent.length-4,Math.round(fraction*(parent.length-1))));
+      if(joins.some(j=>Math.abs(parent.distances[index]-parent.distances[j])<48))continue;
+      const start=parent[index],upstream=Math.atan2(parent[index-3][1]-parent[index+3][1],parent[index-3][0]-parent[index+3][0]);
+      const side=attempt%2?1:-1,heading=upstream+side*(.75+u(2)*.55),length=85+u(3)*135;
+      let x=start[0],y=start[1],angle=heading;const reverse=[[x,y]];
+      for(let travelled=0;travelled<length;travelled+=step){
+        const salt=620+ri*17+attempt;
+        const bend=(fbm(x*.015,y*.015,salt)-.48)*5.6+(fbm(x*.04,y*.04,salt+1)-.5)*1.8;
+        const target=heading+bend,delta=Math.atan2(Math.sin(target-angle),Math.cos(target-angle));angle+=delta*.2;
+        const nx=x+Math.cos(angle)*step,ny=y+Math.sin(angle)*step;
+        if(nx<15||ny<15||nx>W-15||ny>H-TASKBAR-15||sTarget(nx,ny)<24||occ.at(nx,ny))break;
+        if(travelled>32&&riv.any(nx-7,ny-7,nx+7,ny+7))break;
+        x=nx;y=ny;reverse.push([x,y]);
+      }
+      if(reverse.length<20)continue;
+      const branch=reverse.reverse();branch.parent=parent;branch.joinIndex=index;branch.tributary=true;
+      setContinentRiverWidths(branch,Math.max(.8,parent.widths[index]*(.46+u(4)*.14)));
+      w.rivers.push(branch);mark(branch);joins.push(index);
+    }
+  }
+  // 依实际河宽留出两岸空间，树木、城镇和文字不能压到水面上。
+  for(const river of w.rivers)for(let i=0;i<river.length;i++){
+    const [x,y]=river[i],radius=river.widths[i]*.5;
+    riv.mark(x-radius-2,y-radius-2,x+radius+2,y+radius+2);
+    occ.mark(x-radius-6,y-radius-6,x+radius+6,y+radius+6,3);
+  }
+  riv.crossing=(x,y,heading)=>{
+    const near=nearest(x,y);if(!near)return null;
+    const {river,index}=near,a=river[Math.max(0,index-2)],b=river[Math.min(river.length-1,index+2)];
+    const angle=Math.atan2(b[1]-a[1],b[0]-a[0]),cross=Math.max(.3,Math.abs(Math.sin(heading-angle)));
+    const dx=near.x-x,dy=near.y-y,den=Math.cos(heading)*Math.sin(angle)-Math.sin(heading)*Math.cos(angle);
+    const along=Math.abs(den)>.15?(dx*Math.sin(angle)-dy*Math.cos(angle))/den:0;
+    return {x:x+Math.cos(heading)*along,y:y+Math.sin(heading)*along,span:Math.min(48,Math.max(12,river.widths[index]/cross+7))};
+  };
+  return riv;
+}
+
+function setContinentRiverWidths(river,mouthWidth) {
+  river.distances=[0];for(let i=1;i<river.length;i++)river.distances.push(river.distances[i-1]+Math.hypot(river[i][0]-river[i-1][0],river[i][1]-river[i-1][1]));
+  river.totalLength=river.distances[river.length-1];
+  river.widths=river.distances.map(d=>.3+(mouthWidth-.3)*Math.pow(d/river.totalLength,.86));
+  // 汇入已有主河道的干流不能在交汇处比受水河道更宽。
+  if(river.parent?.widths){
+    const max=river.parent.widths[river.joinIndex]*.7;
+    if(mouthWidth>max)river.widths=river.distances.map(d=>.3+(max-.3)*Math.pow(d/river.totalLength,.86));
+  }
+}
+
+function paintContinentRivers(ctx,rivers) {
+  const bank=(river,extra)=>{
+    const left=[],right=[];
+    for(let i=0;i<river.length;i++){
+      const p=river[i],a=river[Math.max(0,i-2)],b=river[Math.min(river.length-1,i+2)],length=Math.hypot(b[0]-a[0],b[1]-a[1])||1;
+      const nx=-(b[1]-a[1])/length,ny=(b[0]-a[0])/length,r=river.widths[i]*.5+extra;
+      left.push([p[0]+nx*r,p[1]+ny*r]);right.push([p[0]-nx*r,p[1]-ny*r]);
+    }
+    ctx.beginPath();left.concat(right.reverse()).forEach(([x,y],i)=>i?ctx.lineTo(x,y):ctx.moveTo(x,y));ctx.closePath();ctx.fill();
+  };
+  // 先画所有河岸，再统一填水，支流汇入处不会留下一道横穿水面的岸线。
+  ctx.fillStyle=GREEN;for(const river of rivers)bank(river,.2);
+  // 透明图层的黑色使用未分配的 alpha 余量编码河道，最终灰色由着色器给出，仍只上传一张静态纹理。
+  ctx.fillStyle='#000';for(const river of rivers)bank(river,0);
+}

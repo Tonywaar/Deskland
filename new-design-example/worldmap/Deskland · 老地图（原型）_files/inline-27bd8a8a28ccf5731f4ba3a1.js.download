@@ -1,0 +1,168 @@
+
+// 网站演示：自动摆图标、虚线框选右侧小阵整批拖走、再拖中间的主角，画面重新生长，循环
+(function () {
+  const rnd = (a, b) => a + Math.random() * (b - a);
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const H2 = () => H - TASKBAR;
+  if (typeof applyLayout === 'undefined' || typeof icons === 'undefined') return;
+  const requestedLanguage = new URLSearchParams(location.search).get('lang') || 'zh';
+  const translations = {"ru":{"回收站":"Корзина","项目资料":"Проекты","2026 报价单.xlsx":"Смета 2026.xlsx","产品需求.docx":"Требования.docx","截图_0927.png":"Снимок_0927.png","合同扫描件.pdf":"Договор.pdf","新建文件夹":"Новая папка","设计素材":"Материалы дизайна","旅行照片":"Фото путешествий","安装包.zip":"Установщик.zip","会议纪要.docx":"Протокол.docx","壁纸灵感":"Идеи для обоев","周报.xlsx":"Отчёт за неделю.xlsx","桌面截图02.png":"Снимок02.png","旧备份":"Старые копии","微信图片.png":"Фото из чата.png","说明书.pdf":"Руководство.pdf","简历.docx":"Резюме.docx","支出表.xlsx":"Расходы.xlsx","压缩备份.zip":"Резервная копия.zip","素材图.png":"Референс.png","下载":"Загрузки","表情包.png":"Стикер.png","工资条.xlsx":"Расчётный лист.xlsx","租房合同.pdf":"Аренда.pdf","日记.docx":"Дневник.docx","桌面截图.png":"Рабочий стол.png"},"es":{"回收站":"Papelera","项目资料":"Proyectos","2026 报价单.xlsx":"Presupuesto 2026.xlsx","产品需求.docx":"Requisitos.docx","截图_0927.png":"Captura_0927.png","合同扫描件.pdf":"Contrato.pdf","新建文件夹":"Nueva carpeta","设计素材":"Recursos de diseño","旅行照片":"Fotos de viajes","安装包.zip":"Instalador.zip","会议纪要.docx":"Acta.docx","壁纸灵感":"Ideas de fondos","周报.xlsx":"Informe semanal.xlsx","桌面截图02.png":"Captura02.png","旧备份":"Copias antiguas","微信图片.png":"Imagen de chat.png","说明书.pdf":"Manual.pdf","简历.docx":"Currículum.docx","支出表.xlsx":"Gastos.xlsx","压缩备份.zip":"Copia de seguridad.zip","素材图.png":"Referencia.png","下载":"Descargas","表情包.png":"Pegatina.png","工资条.xlsx":"Nómina.xlsx","租房合同.pdf":"Alquiler.pdf","日记.docx":"Diario.docx","桌面截图.png":"Escritorio.png"},"pt-BR":{"回收站":"Lixeira","项目资料":"Projetos","2026 报价单.xlsx":"Orçamento 2026.xlsx","产品需求.docx":"Requisitos.docx","截图_0927.png":"Captura_0927.png","合同扫描件.pdf":"Contrato.pdf","新建文件夹":"Nova pasta","设计素材":"Recursos de design","旅行照片":"Fotos de viagens","安装包.zip":"Instalador.zip","会议纪要.docx":"Ata.docx","壁纸灵感":"Ideias de papéis de parede","周报.xlsx":"Relatório semanal.xlsx","桌面截图02.png":"Captura02.png","旧备份":"Backups antigos","微信图片.png":"Imagem do chat.png","说明书.pdf":"Manual.pdf","简历.docx":"Currículo.docx","支出表.xlsx":"Despesas.xlsx","压缩备份.zip":"Backup.zip","素材图.png":"Referência.png","下载":"Downloads","表情包.png":"Figurinha.png","工资条.xlsx":"Holerite.xlsx","租房合同.pdf":"Aluguel.pdf","日记.docx":"Diário.docx","桌面截图.png":"Área de trabalho.png"},"fr":{"回收站":"Corbeille","项目资料":"Projets","2026 报价单.xlsx":"Devis 2026.xlsx","产品需求.docx":"Spécifications.docx","截图_0927.png":"Capture_0927.png","合同扫描件.pdf":"Contrat.pdf","新建文件夹":"Nouveau dossier","设计素材":"Ressources graphiques","旅行照片":"Photos de voyage","安装包.zip":"Installation.zip","会议纪要.docx":"Compte rendu.docx","壁纸灵感":"Idées de fonds d’écran","周报.xlsx":"Rapport hebdo.xlsx","桌面截图02.png":"Capture02.png","旧备份":"Anciennes sauvegardes","微信图片.png":"Image de discussion.png","说明书.pdf":"Manuel.pdf","简历.docx":"CV.docx","支出表.xlsx":"Dépenses.xlsx","压缩备份.zip":"Sauvegarde.zip","素材图.png":"Référence.png","下载":"Téléchargements","表情包.png":"Autocollant.png","工资条.xlsx":"Fiche de paie.xlsx","租房合同.pdf":"Bail.pdf","日记.docx":"Journal.docx","桌面截图.png":"Bureau.png"},"de":{"回收站":"Papierkorb","项目资料":"Projekte","2026 报价单.xlsx":"Angebot 2026.xlsx","产品需求.docx":"Anforderungen.docx","截图_0927.png":"Screenshot_0927.png","合同扫描件.pdf":"Vertrag.pdf","新建文件夹":"Neuer Ordner","设计素材":"Designmaterial","旅行照片":"Reisefotos","安装包.zip":"Installation.zip","会议纪要.docx":"Protokoll.docx","壁纸灵感":"Hintergrundideen","周报.xlsx":"Wochenbericht.xlsx","桌面截图02.png":"Screenshot02.png","旧备份":"Alte Sicherungen","微信图片.png":"Chatbild.png","说明书.pdf":"Anleitung.pdf","简历.docx":"Lebenslauf.docx","支出表.xlsx":"Ausgaben.xlsx","压缩备份.zip":"Sicherung.zip","素材图.png":"Referenz.png","下载":"Downloads","表情包.png":"Sticker.png","工资条.xlsx":"Gehaltsabrechnung.xlsx","租房合同.pdf":"Mietvertrag.pdf","日记.docx":"Tagebuch.docx","桌面截图.png":"Desktop.png"},"ja":{"回收站":"ごみ箱","项目资料":"プロジェクト資料","2026 报价单.xlsx":"2026 見積書.xlsx","产品需求.docx":"製品要件.docx","截图_0927.png":"スクリーンショット_0927.png","合同扫描件.pdf":"契約書スキャン.pdf","新建文件夹":"新しいフォルダー","设计素材":"デザイン素材","旅行照片":"旅行の写真","安装包.zip":"インストーラー.zip","会议纪要.docx":"議事録.docx","壁纸灵感":"壁紙アイデア","周报.xlsx":"週報.xlsx","桌面截图02.png":"デスクトップ02.png","旧备份":"古いバックアップ","微信图片.png":"チャット画像.png","说明书.pdf":"マニュアル.pdf","简历.docx":"履歴書.docx","支出表.xlsx":"支出表.xlsx","压缩备份.zip":"バックアップ.zip","素材图.png":"参考画像.png","下载":"ダウンロード","表情包.png":"スタンプ.png","工资条.xlsx":"給与明細.xlsx","租房合同.pdf":"賃貸契約書.pdf","日记.docx":"日記.docx","桌面截图.png":"デスクトップ.png"},"ko":{"回收站":"휴지통","项目资料":"프로젝트 자료","2026 报价单.xlsx":"2026 견적서.xlsx","产品需求.docx":"제품 요구사항.docx","截图_0927.png":"스크린샷_0927.png","合同扫描件.pdf":"계약서 스캔.pdf","新建文件夹":"새 폴더","设计素材":"디자인 자료","旅行照片":"여행 사진","安装包.zip":"설치 파일.zip","会议纪要.docx":"회의록.docx","壁纸灵感":"배경화면 아이디어","周报.xlsx":"주간 보고서.xlsx","桌面截图02.png":"바탕 화면02.png","旧备份":"이전 백업","微信图片.png":"채팅 이미지.png","说明书.pdf":"설명서.pdf","简历.docx":"이력서.docx","支出表.xlsx":"지출 내역.xlsx","压缩备份.zip":"백업.zip","素材图.png":"참고 이미지.png","下载":"다운로드","表情包.png":"스티커.png","工资条.xlsx":"급여 명세서.xlsx","租房合同.pdf":"임대 계약서.pdf","日记.docx":"일기.docx","桌面截图.png":"바탕 화면.png"}};
+  const englishNames = {
+    '回收站': 'Recycle Bin', '项目资料': 'Projects', '2026 报价单.xlsx': '2026 Quote.xlsx',
+    '产品需求.docx': 'Requirements.docx', '截图_0927.png': 'Screenshot_0927.png',
+    '合同扫描件.pdf': 'Contract.pdf', '新建文件夹': 'New Folder', '设计素材': 'Design Assets',
+    '旅行照片': 'Travel Photos', '安装包.zip': 'Installer.zip', '会议纪要.docx': 'Meeting Notes.docx',
+    '壁纸灵感': 'Wallpaper Ideas', '周报.xlsx': 'Weekly Report.xlsx',
+    '桌面截图02.png': 'Screenshot02.png', '旧备份': 'Old Backups', '微信图片.png': 'Chat Image.png',
+    '说明书.pdf': 'Manual.pdf', '简历.docx': 'Resume.docx', '支出表.xlsx': 'Expenses.xlsx',
+    '压缩备份.zip': 'Backup.zip', '素材图.png': 'Reference.png', '下载': 'Downloads',
+    '表情包.png': 'Sticker.png', '工资条.xlsx': 'Payslip.xlsx', '租房合同.pdf': 'Lease.pdf',
+    '日记.docx': 'Journal.docx', '桌面截图.png': 'Screenshot.png'
+  };
+  const locale = ['zh', 'en', ...Object.keys(translations)].includes(requestedLanguage) ? requestedLanguage : 'en';
+  const fileNames = locale === 'en' ? englishNames : translations[locale] || {};
+  document.documentElement.lang = locale === 'zh' ? 'zh-CN' : locale;
+  if (locale !== 'zh') {
+    FILES.forEach((file) => { file[0] = fileNames[file[0]] || file[0]; });
+  }
+  const screenshotName = fileNames['桌面截图02.png'] || '桌面截图02.png';
+  const style = document.createElement('style');
+  style.textContent = '#panel,.hint,#stats,#taskbar{display:none!important}' +
+    '.dmx{position:fixed;border:1.5px dashed rgba(70,150,215,.95);background:rgba(70,150,215,.14);border-radius:6px;pointer-events:none;z-index:80;transition:left .45s ease,top .45s ease,width .45s ease,height .45s ease}';
+  document.head.appendChild(style);
+
+  function crossesHeadline(list, x, y) {
+    // 读取官网实际文案范围，中文、英文和交替文案都按当前尺寸避让。
+    let area;
+    try {
+      const frame = window.frameElement;
+      const copy = frame && frame.closest('[data-demo]').querySelector('.copy');
+      if (!copy) return false;
+      const text = copy.getBoundingClientRect(), viewport = frame.getBoundingClientRect();
+      area = { left: text.left - viewport.left - 24, top: text.top - viewport.top - 24,
+        right: text.right - viewport.left + 24, bottom: text.bottom - viewport.top + 24 };
+    } catch { return false; }
+    const dx = x - list[0].x, dy = y - list[0].y;
+    // 连同拖动途中经过的范围一起检查，避免从标题下方穿过。
+    return list.some((ic) => Math.min(ic.x, ic.x + dx) < area.right &&
+      Math.max(ic.x + ic.w, ic.x + dx + ic.w) > area.left &&
+      Math.min(ic.y, ic.y + dy) < area.bottom &&
+      Math.max(ic.y + ic.h, ic.y + dy + ic.h) > area.top);
+  }
+
+  function farSpot(list, minD) {                 // 按整组占用的范围挑落点，不碰其他图标、不出屏幕
+    const anchor = list[0], from = [anchor.x, anchor.y];
+    const x0 = Math.min(...list.map((ic) => ic.x - anchor.x));
+    const y0 = Math.min(...list.map((ic) => ic.y - anchor.y));
+    const x1 = Math.max(...list.map((ic) => ic.x - anchor.x + ic.w));
+    const y1 = Math.max(...list.map((ic) => ic.y - anchor.y + ic.h));
+    const mx = Math.min(32, Math.max(0, (W - (x1 - x0)) / 2));
+    const my = Math.min(24, Math.max(0, (H2() - (y1 - y0)) / 2));
+    const minX = mx - x0, maxX = W - mx - x1;
+    const minY = my - y0, maxY = H2() - my - y1;
+    if (maxX < minX || maxY < minY) return from;
+    const others = icons.filter((ic) => !list.includes(ic));
+    let best = null;
+    for (let t = 0; t < 120; t++) {
+      const x = rnd(minX, maxX), y = rnd(minY, maxY);
+      if (Math.hypot(x - from[0], y - from[1]) < minD) continue;
+      if (crossesHeadline(list, x, y)) continue;
+      let md = 1e9;
+      for (const ic of others) {
+        const dx = Math.max(ic.x - (x + x1), x + x0 - (ic.x + ic.w), 0);
+        const dy = Math.max(ic.y - (y + y1), y + y0 - (ic.y + ic.h), 0);
+        md = Math.min(md, Math.hypot(dx, dy));
+      }
+      if (md < 16) continue;
+      const score = Math.min(md, 400) + Math.random() * 50;
+      if (!best || score > best.score) best = { x, y, score };
+    }
+    return best ? [best.x, best.y] : from;          // 没有安全落点时留在原处
+  }
+  async function glide(list, to, dur) {          // 一个或一批图标平滑拖到落点，松手后画面重新生长
+    list.forEach((ic) => ic.el.classList.add('drag'));
+    const from = list.map((ic) => [ic.x, ic.y]);
+    const dx = to[0] - from[0][0], dy = to[1] - from[0][1];
+    const t0 = performance.now();
+    await new Promise((done) => {
+      const step = (now) => {
+        const t = Math.min((now - t0) / dur, 1), e = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+        list.forEach((ic, i) => setPos(ic, from[i][0] + dx * e, from[i][1] + dy * e));
+        t < 1 ? requestAnimationFrame(step) : done();
+      };
+      requestAnimationFrame(step);
+    });
+    list.forEach((ic) => ic.el.classList.remove('drag'));
+    commit();
+  }
+  function besideSpot(ic, target) {             // 放到主角旁边，保留间距，不与任何图标重叠
+    const right = target.x + target.w + 12, left = target.x - ic.w - 12;
+    const below = target.y + target.h + 12, above = target.y - ic.h - 12;
+    const spots = [[right, target.y], [left, target.y], [target.x, below], [target.x, above],
+      [right, below], [left, below], [right, above], [left, above]];
+    return spots.find(([x, y]) => x >= 8 && y >= 8 && x + ic.w <= W - 8 && y + ic.h <= H2() - 8 &&
+      !crossesHeadline([ic], x, y) &&
+      !icons.some((other) => other !== ic && x < other.x + other.w + 8 && x + ic.w + 8 > other.x &&
+        y < other.y + other.h + 8 && y + ic.h + 8 > other.y));
+  }
+  const marquee = document.createElement('div');
+  marquee.className = 'dmx'; marquee.style.display = 'none';
+  document.body.appendChild(marquee);
+  function box(list, on) {
+    if (!on) { marquee.style.display = 'none'; list.forEach((ic) => ic.el.classList.remove('sel')); return; }
+    let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+    for (const ic of list) { x0 = Math.min(x0, ic.x); y0 = Math.min(y0, ic.y); x1 = Math.max(x1, ic.x + ic.w); y1 = Math.max(y1, ic.y + ic.h); }
+    const m = 8;
+    Object.assign(marquee.style, { display: 'block', left: x0 - m + 'px', top: y0 - m + 'px', width: x1 - x0 + 2 * m + 'px', height: y1 - y0 + 2 * m + 'px' });
+    list.forEach((ic) => ic.el.classList.add('sel'));
+  }
+  async function cycle() {
+    applyLayout('demo');
+    // 原型在窄屏 / 矮屏会把超出的格子夹到最后一行或一列，去掉由此产生的重复图标。
+    const cells = new Set(), count = icons.length;
+    icons = icons.filter((ic) => {
+      const key = ic.x + ',' + ic.y;
+      if (cells.has(key)) { ic.el.remove(); return false; }
+      cells.add(key); return true;
+    });
+    if (icons.length !== count) commit(true);
+    await sleep(2600);                            // 等开场长好
+    // 先确定整组和单个主角，避免单个演示又选中刚刚移动的整组图标。
+    const bx0 = GRID_X0 + 2 * CELL_W - 2, bx1 = GRID_X0 + 4 * CELL_W - 2, by1 = GRID_Y0 + 3 * CELL_H - 2;
+    const block = icons.filter((ic) => ic.x >= bx0 && ic.x < bx1 && ic.y < by1);
+    const screenshot = icons.find((ic) => ic.name === screenshotName);
+    const cx = W / 2, cy = H2() / 2;
+    const candidates = icons.filter((ic) => !block.includes(ic) && ic !== screenshot);
+    const hero = candidates.length ? candidates.reduce((a, b) => Math.hypot(a.x + a.w / 2 - cx, a.y + a.h / 2 - cy) <= Math.hypot(b.x + b.w / 2 - cx, b.y + b.h / 2 - cy) ? a : b) : null;
+    // 1) 框选前 3 行的 6 个图标，保持排列整批拖走，再展示画面变化。
+    if (block.length) {
+      box(block, true);
+      await sleep(900);
+      const dest = farSpot(block, W * 0.2);
+      marquee.style.display = 'none';
+      await glide(block, dest, 1600);
+      box(block, false);
+      await sleep(2400);
+    }
+    // 2) 再拖一个主角，挑落点时为稍后放到旁边的截图预留空间。
+    if (hero) {
+      const footprint = screenshot ? [hero, { ...screenshot, x: hero.x + hero.w + 12, y: hero.y }] : [hero];
+      await glide([hero], farSpot(footprint, W * 0.22), 1300);
+      // 3) 从左侧第二列拖来“桌面截图02”，和主角放在一起，再展示两者周围的变化。
+      if (screenshot) {
+        await sleep(1800);
+        const beside = besideSpot(screenshot, hero);
+        if (beside) await glide([screenshot], beside, 1200);
+      }
+    }
+    await sleep(15000);                           // 切换前不重置布局；独立打开演示页时稍后再循环
+    cycle();                                      // 下一轮：重新摆好，换个随机落点
+  }
+  cycle();
+  // 隐藏 iframe 在部分浏览器里会限流 requestAnimationFrame；用定时器保证就绪通知能到达。
+  setTimeout(() => {
+    if (window.parent !== window) window.parent.postMessage({
+      type: 'deskland-demo-ready', page: location.pathname.split('/').pop()
+    }, location.origin);
+  }, 80);
+})();

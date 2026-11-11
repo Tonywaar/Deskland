@@ -1,0 +1,1466 @@
+
+'use strict';
+
+/* ======================================================================
+   Parameters
+   ====================================================================== */
+const CELL_W = 76, CELL_H = 100, GRID_X0 = 4, GRID_Y0 = 6, TASKBAR = 48;
+const STEP = 5;
+const MORPH_MS = 1800;
+
+const QS = new URLSearchParams(location.search);
+const WALL = QS.has('wallpaper');      // Wallpaper mode: the desktop host loads this page, and messages come from the host
+const PREVIEW = QS.has('preview');     // Preview mode: a thumbnail preview in the settings window (iframe); messages come from the parent page
+const DARK = QS.has('dark');           // Dark map: the same chart, dark paper and pale ink, no moon disc
+const PROTOTYPE_STATS = !WALL && !PREVIEW; // Frame-rate and timing samples are for the standalone prototype only
+// Defaults must match the old-map theme default in themes.json; grain and quality are not exposed
+const P = {
+  sigma: 80, warp: 40, edge: 10, ships: 2, wagons: 5, grain: 1, quality: 2,   // quality 2: draw at the screen's real pixels (fine ink lines, and place names stay clear)
+  debug: false, snap: true, cap30: true,
+};
+const DEFAULTS = Object.assign({}, P);
+const SLIDERS = [
+  { key: 'sigma',  label: 'Sea size', min: 50,  max: 200, step: 1,    fmt: v => v + ' px', act: 'field' },
+  { key: 'ships',  label: 'Ships',     min: 0,   max: 3,   step: 1,    fmt: v => v + ' ships' },
+  { key: 'wagons', label: 'Wagons', min: 0,   max: 8,   step: 1,    fmt: v => v + ' wagons' },
+];
+
+/* ======================================================================
+   Icons and layout data
+   ====================================================================== */
+const PAGE = '<path d="M12 4h17l9 9v29a2 2 0 0 1-2 2H12a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" fill="#fbfbfb" stroke="#c4c4c4"/><path d="M29 4v7a2 2 0 0 0 2 2h7z" fill="#dedede"/>';
+const LINES = '<path d="M24 20h10M24 25h10M24 30h10M24 35h10" stroke="#c9c9c9" stroke-width="1.6"/>';
+const badge = (color, text, size = 11) => `<rect x="4" y="21" width="19" height="19" rx="3" fill="${color}"/><text x="13.5" y="34.5" text-anchor="middle" font-family="Segoe UI,Arial" font-weight="700" font-size="${size}" fill="#fff">${text}</text>`;
+const SVG = {
+  folder: '<path d="M4 12a3 3 0 0 1 3-3h11l4 4h19a3 3 0 0 1 3 3v2H4z" fill="#e09b1d"/><path d="M4 17h40v20a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3z" fill="#ffc83d"/><path d="M4 17h40v2.5H4z" fill="#ffd978"/>',
+  docx: PAGE + LINES + badge('#185abd', 'W'),
+  xlsx: PAGE + '<path d="M24 19h11v17H24zM24 24.5h11M24 30h11M29.5 19v17" stroke="#9ac9a9" stroke-width="1.3" fill="none"/>' + badge('#107c41', 'X'),
+  pdf:  PAGE + LINES + badge('#d33a2c', 'PDF', 7.5),
+  cad:  PAGE + LINES + badge('#2a7fd4', 'DWG', 7),
+  txt:  PAGE + '<path d="M16 18h16M16 23h16M16 28h16M16 33h10" stroke="#9a9a9a" stroke-width="1.6"/>',
+  png:  PAGE + '<rect x="14" y="17" width="20" height="17" rx="1.5" fill="#8fd0f5"/><path d="M14 30l6-6 5 5 3-3 6 6v1.5a1.5 1.5 0 0 1-1.5 1.5h-17A1.5 1.5 0 0 1 14 34z" fill="#3fa35a"/><circle cx="29" cy="21.5" r="2" fill="#fff4b8"/>',
+  shot: '<rect x="3" y="13" width="42" height="25" rx="1" fill="#1d2129" stroke="#f2f2f2" stroke-width="1.5"/><rect x="6" y="16" width="14" height="3" fill="#5b8def"/><rect x="6" y="21" width="22" height="2" fill="#6c7280"/><rect x="6" y="25" width="18" height="2" fill="#6c7280"/><rect x="31" y="16" width="11" height="18" fill="#2e3440"/>',
+  zip:  PAGE + '<path d="M22 4v4h3v3h-3v3h3v3h-3v3h3v3h-3" stroke="#8a6d3b" stroke-width="2" fill="none"/><rect x="20" y="26" width="7" height="8" rx="1" fill="#8a6d3b"/>',
+  bin:  '<path d="M12 14h24l-2.5 27a3 3 0 0 1-3 2.7H17.5a3 3 0 0 1-3-2.7z" fill="rgba(215,235,250,.55)" stroke="rgba(255,255,255,.9)" stroke-width="1.2"/><path d="M10 12.5h28" stroke="rgba(255,255,255,.95)" stroke-width="2.4" stroke-linecap="round"/><path d="M19 19l1 19M24 19v19M29 19l-1 19" stroke="rgba(255,255,255,.7)" stroke-width="1.2"/>',
+  pc:   '<rect x="5" y="8" width="38" height="26" rx="2" fill="#1f8fe0" stroke="#bfe3ff" stroke-width="1.5"/><path d="M5 30h38" stroke="#0d5fa8" stroke-width="3"/><path d="M19 34l-2 6h14l-2-6z" fill="#9aa7b4"/>',
+};
+const APP_COLORS = ['#e8553e','#2f7de1','#18a058','#8b5cf6','#f59e0b','#0ea5a4','#db2777','#334155','#16a34a','#2563eb'];
+function appSVG(name) {
+  let h = 0; for (const ch of name) h = (h * 31 + ch.codePointAt(0)) >>> 0;
+  return `<rect x="5" y="5" width="38" height="38" rx="9" fill="${APP_COLORS[h % APP_COLORS.length]}"/><path d="M5 14a9 9 0 0 1 9-9h20a9 9 0 0 1 9 9v6H5z" fill="#fff" opacity=".14"/>` +
+    `<text x="24" y="31.5" text-anchor="middle" font-family="Segoe UI,Microsoft YaHei,Arial" font-weight="700" font-size="18" fill="#fff">${[...name][0]}</text>`;
+}
+const glyphOf = (name, type) => type === 'app' ? appSVG(name) : SVG[type];
+
+const FILES = [
+  ['Recycle Bin','bin'], ['Project files','folder'], ['Quote 2026.xlsx','xlsx'], ['Requirements.docx','docx'],
+  ['Shot_0927.png','png'], ['Contract.pdf','pdf'], ['New folder','folder'], ['Design assets','folder'],
+  ['Travel photos','folder'], ['Setup.zip','zip'], ['Meeting notes.docx','docx'], ['Wallpaper ideas','folder'],
+  ['Weekly.xlsx','xlsx'], ['Desktop 02.png','png'], ['Old backup','folder'], ['Photo.png','png'], ['Manual.pdf','pdf'], ['Resume.docx','docx'], ['Expenses.xlsx','xlsx'], ['Backup.zip','zip'], ['Asset.png','png'], ['Downloads','folder'], ['Stickers.png','png'], ['Payroll.xlsx','xlsx'], ['Lease.pdf','pdf'], ['Journal.docx','docx'], ['Desktop.png','png'],
+];
+const EXTRA = [
+  ['New text.txt','txt'], ['New folder (2)','folder'], ['Invoice.pdf','pdf'], ['Export.xlsx','xlsx'],
+  ['Shot_0928.png','png'], ['Memo.txt','txt'], ['Archive.zip','zip'], ['New folder (3)','folder'],
+];
+const APPS = ['Recycle Bin','This PC','Chat','Mail','Tasks','Meet','Music','Editor','Photoshop','Obsidian','VS Code','Krita',
+  'AutoCAD','Rhino','KeyShot','Drive','Chrome','Blender','Figma','Notion','QQ','Steam','Eagle','OBS','Kimi','PureRef','Recorder','NX 12.0','MarkText','Codex'];
+const MISC = [['projects','folder'],['Games','folder'],['todolist','folder'],['OKR.xlsx','xlsx'],['Fixed costs.xlsx','xlsx'],
+  ['pdfarrange','app'],['stp.log','txt'],['Part.stp','txt'],['Part.3dm','png'],['Preview','folder']];
+const RIGHT = [['plot.log','txt'],['Tools','folder'],['Archive.rar','zip'],['1685x128.png','png'],['Photo.jpg','png'],['0914.png','png'],
+  ['Photo 2.jpg','png'],['images.png','png'],['Contents.docx','docx'],['api.txt','txt'],['c4ef.png','png'],['0918.png','png'],
+  ['Board.pdf','pdf'],['recommend.txt','txt'],['button.stp','txt'],['New text (2).txt','txt'],['ugstep21','txt'],['New text (3).txt','txt'],
+  ['Work plan.txt','txt'],['Photo 3.jpg','png'],['New doc.docx','docx'],['SEO.txt','txt'],['resend.txt','txt'],['Product intro.txt','txt'],
+  ['USER.pdf','pdf'],['New text.txt','txt'],['Chair.pur','png'],['PAP-20.pdf','pdf'],['Slides.pptx','pdf'],['Issues.txt','txt']];
+function mineCells() {
+  const out = []; let a = 0, m = 0, rgt = 0, sh = 0;
+  for (let c = 0; c < 3; c++) for (let r = 0; r < 10; r++) {
+    const name = APPS[a++];
+    out.push([c, r, name, name === 'Recycle Bin' ? 'bin' : name === 'This PC' ? 'pc' : 'app']);
+  }
+  for (let r = 0; r < 10; r++) out.push([3, r, ...MISC[m++]]);
+  for (let r = 0; r < 5; r++) out.push([5, r, `Part layout ${r + 1}.dwg`, 'cad']);
+  out.push([6, 0, 'Leg test.bak', 'txt']);
+  for (const [c, r] of [[6,4],[6,5],[6,6],[6,7],[6,8],[7,3],[7,4],[7,5],[7,6],[7,7],[8,4],[8,5],[8,6],[9,2],[9,3],[9,4],[9,5],[9,6]])
+    out.push([c, r, `ScreenShot ${++sh}.png`, 'shot']);
+  for (const [c, r] of [[11,1],[11,2],[11,3],[12,1],[12,2],[12,3],[12,4],[13,1],[13,2],[13,3],[13,4],[14,1],[14,3],[14,4],[15,1],[15,6],
+    [16,4],[16,6],[17,4],[17,5],[17,6],[17,7],[19,4],[19,5],[19,8],[20,0],[20,4],[20,6],[21,0],[21,5],[21,6]]) {
+    const f = RIGHT[rgt++ % RIGHT.length]; out.push([c, r, f[0], f[1]]);
+  }
+  return out;
+}
+
+/* ======================================================================
+   CPU noise and a tileable noise texture
+   ====================================================================== */
+let seed = (Math.random() * 1e6) | 0;
+function hash2(x, y, k = 0) {
+  let h = Math.imul(x | 0, 374761393) ^ Math.imul(y | 0, 668265263) ^ Math.imul(seed + k, 2246822519);
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+function vnoise(x, y, k = 0) {
+  const ix = Math.floor(x), iy = Math.floor(y), fx = x - ix, fy = y - iy;
+  const ux = fx * fx * (3 - 2 * fx), uy = fy * fy * (3 - 2 * fy);
+  const a = hash2(ix, iy, k), b = hash2(ix + 1, iy, k), c = hash2(ix, iy + 1, k), d = hash2(ix + 1, iy + 1, k);
+  return a + (b - a) * ux + (c - a) * uy + (a - b - c + d) * ux * uy;
+}
+function fbm(x, y, k = 0) {
+  let a = 0.5, s = 0;
+  for (let i = 0; i < 4; i++) { s += a * vnoise(x, y, k + i * 7); x = x * 2.03 + 17.1; y = y * 2.03 + 17.1; a *= 0.5; }
+  return s;
+}
+function tileNoise(x, y, px, py, k) {
+  const ix = Math.floor(x), iy = Math.floor(y), fx = x - ix, fy = y - iy;
+  const ux = fx * fx * (3 - 2 * fx), uy = fy * fy * (3 - 2 * fy);
+  const m = (v, p) => ((v % p) + p) % p;
+  const x0 = m(ix, px), x1 = m(ix + 1, px), y0 = m(iy, py), y1 = m(iy + 1, py);
+  const a = hash2(x0, y0, k), b = hash2(x1, y0, k), c = hash2(x0, y1, k), d = hash2(x1, y1, k);
+  return a + (b - a) * ux + (c - a) * uy + (a - b - c + d) * ux * uy;
+}
+function tileFbm(u, v, periods, k) {
+  let s = 0, w = 0.5, tw = 0;
+  for (let i = 0; i < periods.length; i++) { s += w * tileNoise(u * periods[i], v * periods[i], periods[i], periods[i], k + i * 13); tw += w; w *= 0.5; }
+  return s / tw;
+}
+function makeNoiseImage() {
+  const S = 256, d = new Uint8Array(S * S * 4);
+  const chans = [[8, 16, 32, 64], [8, 16, 32, 64], [8, 16, 32], [16, 32, 64, 128]];
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const u = x / S, v = y / S, i = (y * S + x) * 4;
+    for (let c = 0; c < 4; c++) {
+      let n = tileFbm(u, v, chans[c], 100 + c * 50);
+      d[i + c] = Math.min(Math.max((n - 0.5) * 1.9 + 0.5, 0), 1) * 255;
+    }
+  }
+  return { S, d };
+}
+
+/* ======================================================================
+   Land field (CPU): s is the signed distance to the coast (<0 is land)
+   ====================================================================== */
+let W = innerWidth, H = innerHeight, Gw = 1, Gh = 1, NZ = null;
+function buildNoise() {
+  const N = Gw * Gh;
+  NZ = { wx: new Float32Array(N), wy: new Float32Array(N) };
+  for (let gy = 0; gy < Gh; gy++) for (let gx = 0; gx < Gw; gx++) {
+    const i = gy * Gw + gx, x = gx * STEP, y = gy * STEP;
+    NZ.wx[i] = fbm(x * 0.0028, y * 0.0028, 1) - 0.47;
+    NZ.wy[i] = fbm(x * 0.0028, y * 0.0028, 2) - 0.47;
+  }
+}
+let fieldMs = 0;
+function computeField(rects) {
+  const t0 = performance.now();
+  const N = Gw * Gh, f1 = new Float32Array(N);
+  const sig = P.sigma, is1 = 1 / (sig * sig);
+  const wa = P.warp * 2.2, wmax = wa * 0.5;
+  for (const r of rects) {
+    const R = 5.5 * sig + Math.max(r.hw, r.hh) * 0.5 + wmax;
+    const gx0 = Math.max(0, Math.floor((r.cx - R) / STEP)), gx1 = Math.min(Gw - 1, Math.ceil((r.cx + R) / STEP));
+    const gy0 = Math.max(0, Math.floor((r.cy - R) / STEP)), gy1 = Math.min(Gh - 1, Math.ceil((r.cy + R) / STEP));
+    const chw = r.hw * 0.5, chh = r.hh * 0.5;
+    for (let gy = gy0; gy <= gy1; gy++) for (let gx = gx0; gx <= gx1; gx++) {
+      const i = gy * Gw + gx;
+      const qx = gx * STEP + NZ.wx[i] * wa, qy = gy * STEP + NZ.wy[i] * wa;
+      let dx = Math.abs(qx - r.cx) - chw, dy = Math.abs(qy - r.cy) - chh;
+      if (dx < 0) dx = 0; if (dy < 0) dy = 0;
+      f1[i] += Math.exp(-(dx * dx + dy * dy) * is1);
+    }
+  }
+  // Floor equals the contribution at the edge of the computed range: offshore distance matches inside and outside that range, so deep sea has no box-shaped seam
+  const c0 = Math.sqrt(-Math.log(0.35)), s = new Float32Array(N), fMin = Math.exp(-30);
+  for (let i = 0; i < N; i++) {
+    const g = Math.log(Math.max(f1[i], fMin));
+    s[i] = sig * (Math.sqrt(Math.max(-g, 0)) - c0) - sig * 0.6 * Math.max(g, 0);
+  }
+  fieldMs = performance.now() - t0;
+  return { s };
+}
+function sampleArr(a, x, y) {
+  const fx = Math.min(Math.max(x / STEP, 0), Gw - 1.001), fy = Math.min(Math.max(y / STEP, 0), Gh - 1.001);
+  const ix = Math.floor(fx), iy = Math.floor(fy), tx = fx - ix, ty = fy - iy, i = iy * Gw + ix;
+  return (a[i] * (1 - tx) + a[i + 1] * tx) * (1 - ty) + (a[i + Gw] * (1 - tx) + a[i + Gw + 1] * tx) * ty;
+}
+
+/* ======================================================================
+   Shader
+   ====================================================================== */
+const VS = `#version 300 es
+void main() {
+  vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
+  gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+}`;
+
+const FS = `#version 300 es
+precision highp float;
+uniform sampler2D uNoise, uFA, uFB;
+uniform vec2 uRes, uGrid;
+uniform float uScale, uSeed, uStep, uMix, uTime, uDebug;
+uniform float uPass;             // 0: draw the static picture (paper, coastline, waterlines, land art) into the cache; 1: blit the cache and add the ships
+uniform sampler2D uCache;
+// Land art (drawn on a 2D canvas, premultiplied alpha): red = paper underlay (covers lines below, land only), green = ink drawn only on land (mountains, trees, rivers, lakes),
+// blue = ink drawn everywhere (place names, compass), and alpha left after the three channels are subtracted = river water. When icons move, old (A) is swapped to new (B) in patches
+uniform sampler2D uOvA, uOvB;
+uniform float uOvMix;
+uniform vec2 uCv;                // canvas device pixels
+uniform vec3 uRose[2];           // Compass: center x, y, radius (radius 0 means none); dashed rays from the compass are drawn here
+uniform sampler2D uShipTex;      // Ship sprite (drawn on a 2D canvas; red = white under the sails and hull, blue = ink)
+uniform float uShipN;
+uniform vec4 uShip[4];           // Ship: x, y (midpoint of the keel), heading times visibility, rock phase
+out vec4 o;
+
+// ---- Palette: old parchment and brown ink ----
+#ifdef MAP_DARK
+const vec3 PAPER = vec3(0.18, 0.16, 0.13), STAIN = vec3(0.11, 0.10, 0.08);
+const vec3 INK = vec3(0.78, 0.72, 0.58), SAIL = vec3(0.42, 0.40, 0.34);
+const vec3 SEA = vec3(0.08, 0.12, 0.16);    // Dark sea, cooler than the land
+const vec3 RIVER = vec3(0.36, 0.48, 0.56);  // Pale water so rivers still read
+#else
+const vec3 PAPER = vec3(0.915, 0.845, 0.675), STAIN = vec3(0.80, 0.67, 0.47);
+const vec3 INK = vec3(0.27, 0.19, 0.12), SAIL = vec3(0.95, 0.91, 0.80);
+const vec3 SEA = vec3(0.94, 0.88, 0.72);    // Sea: clean light paper, with no water stains
+const vec3 RIVER = vec3(0.38);              // River: neutral gray, distinct from the brown ink lines
+#endif
+const float SHIP = 50.0;         // Edge length of the ship sprite (logical pixels)
+
+float hash2(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
+float ss(float a, float b, float x) { float t = clamp((x - a) / (b - a), 0.0, 1.0); return t * t * (3.0 - 2.0 * t); }
+vec4 N(vec2 p, float scale) { return texture(uNoise, p / scale + uSeed * 0.013); }
+float fieldS(sampler2D t, vec2 p) { return texture(t, (p / uStep + 0.5) / uGrid).r; }
+mat2 rot(float a) { float c = cos(a), s = sin(a); return mat2(c, s, -s, c); }
+float line(float d, float w) { return 1.0 - ss(w * 0.5, w * 0.5 + 0.8, d); }   // Ink line: d = distance to the line, w = width (logical pixels)
+// Coast: the field (around icons, values below 0) plus two hand-drawn undulations (a winding shore with small bays and capes); uses the smoothest channel (b: the finest wavelength is scale / 32)
+float coastRaw(vec2 q) {
+  float s = mix(fieldS(uFA, q), fieldS(uFB, q), uMix);
+  return s + (N(q, 900.0).b - 0.5) * 26.0 + (N(q, 420.0).b - 0.5) * 12.0 + (N(q, 200.0).b - 0.5) * 4.0;
+}
+// Distance to the coastline (logical pixels, above 0 is land): normalized by the gradient so the line does not thicken while the field is still flat at the start; gradient samples are spaced apart (the field is interpolated on a 5px grid, and closer samples jump from cell to cell)
+float coastDist(vec2 p) {
+  float d = coastRaw(p);
+  float gx = coastRaw(p + vec2(5.0, 0.0)) - coastRaw(p - vec2(5.0, 0.0));
+  float gy = coastRaw(p + vec2(0.0, 5.0)) - coastRaw(p - vec2(0.0, 5.0));
+  return d / max(length(vec2(gx, gy)) / 10.0, 0.25);
+}
+// ---- Sparse little waves at sea: two small arcs ----
+float waves(vec2 p) {
+  const vec2 G = vec2(46.0, 30.0);
+  vec2 c = floor(p / G);
+  if (hash2(c + 21.7) > 0.13) return 0.0;
+  vec2 b = (c + vec2(0.25 + 0.5 * hash2(c + 1.4), 0.3 + 0.4 * hash2(c + 2.8))) * G;
+  float k = 0.0;
+  for (int i = 0; i < 2; i++) {
+    vec2 q = p - b - vec2(float(i) * 6.5, 0.0);
+    k = max(k, line(abs(length(q - vec2(0.0, 3.5)) - 3.5), 0.75) * step(q.y, 2.0) * step(abs(q.x), 3.5));
+  }
+  return k * 0.55;
+}
+// Land art: x = cover for the lines underneath, y = brown ink, z = gray river.
+vec3 overlay(sampler2D t, float land) {
+  vec4 v = texelFetch(t, ivec2(int(gl_FragCoord.x), int(uCv.y) - 1 - int(gl_FragCoord.y)), 0);
+  float river = max(0.0, v.a - v.r - v.g - v.b) * land;
+  return vec3(clamp((v.r + v.g) * land + v.b + river, 0.0, 1.0), clamp(v.g * land + v.b, 0.0, 1.0), river);
+}
+
+void main() {
+  vec2 p = vec2(gl_FragCoord.x, uRes.y * uScale - gl_FragCoord.y) / uScale;
+  if (uPass > 0.5) {                                           // Each frame: blit the cache and draw the ships (a gentle bob, and a slight rock from side to side)
+    vec3 col = texelFetch(uCache, ivec2(gl_FragCoord.xy), 0).rgb;
+    for (int i = 0; i < 4; i++) {
+      if (float(i) >= uShipN) break;
+      vec4 s = uShip[i];
+      float a = abs(s.z);
+      vec2 q = p - s.xy;
+      if (a < 0.01 || abs(q.x) > SHIP * 0.6 || q.y < -SHIP * 0.9 || q.y > SHIP * 0.3) continue;
+      q.y -= sin(uTime * 1.6 + s.w) * 0.9;
+      q = rot(sin(uTime * 1.1 + s.w * 1.7) * 0.05) * q;
+      q.x *= sign(s.z);
+      vec2 uv = q / SHIP + vec2(0.5, 0.8);
+      if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) continue;
+      vec4 sp = texture(uShipTex, uv);
+      col = mix(col, SAIL, clamp(sp.r, 0.0, 1.0) * a);
+      col = mix(col, INK, clamp(sp.b, 0.0, 1.0) * a * 0.92);
+    }
+    o = vec4(col, 1.0);
+    return;
+  }
+
+  // ---------- Old parchment (land only): large water stains and finer speckles (the edges of the picture stay bright) ----------
+  vec3 col = mix(PAPER, STAIN, ss(0.35, 0.85, N(p, 1100.0).b) * 0.55 + ss(0.55, 0.92, N(p + 91.0, 300.0).r) * 0.3);
+
+  float d = coastDist(p);                                     // > 0 land, < 0 sea
+  float land = ss(-0.6, 0.6, d);
+  float ink = 0.0;
+  if (d < 0.0) {
+    // ---------- Sea: clean paper color; two waterlines along the shore, three counting the main coastline, and sparse little waves farther out ----------
+    col = SEA;
+    ink = max(ink, line(abs(d + 5.0), 0.9) * 0.75);
+    // The third line is finer. Where the shore gets steep it fades out early, so a crease in the distance field does not spike into open sea.
+    float coastStep = length(vec2(dFdx(d), dFdy(d)));
+    float thirdStable = 1.0 - ss(1.05 / uScale, 1.55 / uScale, coastStep);
+    ink = max(ink, line(abs(d + 10.0), 0.45) * 0.42 * thirdStable);
+    if (d < -30.0) ink = max(ink, waves(p));
+  } else {
+    col *= 0.975 - 0.05 * ss(10.0, 0.0, d);                   // Land is a little darker in a band along the shore
+  }
+  ink = max(ink, line(abs(d), 1.7));                          // Coastline: one thick ink line
+  // ---------- Dashed rays from the compass (sixteen directions): clearer at sea, very faint on land ----------
+  for (int i = 0; i < 2; i++) {
+    vec3 R = uRose[i];
+    if (R.z <= 0.0) continue;
+    vec2 q = p - R.xy;
+    float a = atan(q.y, q.x), k = floor(a / 0.3926991 + 0.5) * 0.3926991;
+    vec2 dir = vec2(cos(k), sin(k));
+    float along = dot(q, dir), perp = abs(q.x * dir.y - q.y * dir.x);
+    float dots = line(perp, 0.9) * step(R.z + 6.0, along) * step(abs(fract(along / 9.0) - 0.5), 0.2);
+    ink = max(ink, dots * mix(0.42, 0.16, land));
+  }
+  // ---------- Land art: the old texture swaps to the new one in patches (like ink slowly blooming) ----------
+  vec3 ov = overlay(uOvB, land);
+  if (uOvMix < 0.999) {
+    float n = N(p, 350.0).r;
+    ov = mix(overlay(uOvA, land), ov, ss(n - 0.12, n + 0.12, uOvMix * 1.24 - 0.12));
+  }
+  ink = clamp(ink * (1.0 - ov.x) + ov.y, 0.0, 1.0);
+  col = mix(col, RIVER, ov.z);
+  col = mix(col, INK, ink * 0.9);
+  if (uDebug > 0.5) col = mix(col, vec3(0.9, 0.15, 0.15), 1.0 - ss(0.0, 1.5, abs(d)));
+  o = vec4(col, 1.0);
+}`;
+
+/* ======================================================================
+   WebGL
+   ====================================================================== */
+const cv = document.getElementById('art');
+const gl = cv.getContext('webgl2', { antialias: false });
+if (!gl) document.getElementById('nogl').style.display = 'grid';
+function program(fs, vs = VS) {
+  const mk = (type, src) => {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) { console.error(gl.getShaderInfoLog(s)); throw new Error('shader'); }
+    return s;
+  };
+  const p = gl.createProgram();
+  gl.attachShader(p, mk(gl.VERTEX_SHADER, vs));
+  gl.attachShader(p, mk(gl.FRAGMENT_SHADER, fs));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) console.error(gl.getProgramInfoLog(p));
+  const U = {};
+  const n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
+  for (let i = 0; i < n; i++) { const nm = gl.getActiveUniform(p, i).name.replace(/\[0\]$/, ''); U[nm] = gl.getUniformLocation(p, nm); }
+  return { p, U };
+}
+function themeFS() {
+  if (!DARK) return FS;
+  return FS.replace('#version 300 es', '#version 300 es\n#define MAP_DARK');
+}
+const PR = program(themeFS());
+let cacheTex = null, cacheFB = null, cacheW = 0, cacheH = 0, cacheOK = false, cacheDebug = false;
+function ensureCache() {
+  if (cacheTex && cacheW === cv.width && cacheH === cv.height) return;
+  if (cacheTex) { gl.deleteTexture(cacheTex); gl.deleteFramebuffer(cacheFB); }
+  cacheTex = gl.createTexture();
+  gl.activeTexture(gl.TEXTURE5); gl.bindTexture(gl.TEXTURE_2D, cacheTex);
+  gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, cv.width, cv.height);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  cacheFB = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, cacheFB);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, cacheTex, 0);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  cacheW = cv.width; cacheH = cv.height; cacheOK = false;
+}
+gl.bindVertexArray(gl.createVertexArray());
+
+let noiseTex = null;
+function buildNoiseTex() {
+  const { S, d } = makeNoiseImage();
+  noiseTex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, noiseTex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, S, S, 0, gl.RGBA, gl.UNSIGNED_BYTE, d);
+  gl.generateMipmap(gl.TEXTURE_2D);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+}
+const f32 = new Float32Array(1), u32 = new Uint32Array(f32.buffer);
+function toHalf(v) {
+  f32[0] = v; const x = u32[0];
+  const sign = (x >>> 16) & 0x8000, e = ((x >>> 23) & 0xff) - 112, m = x & 0x7fffff;
+  if (e <= 0) return sign;
+  if (e >= 31) return sign | 0x7c00;
+  return sign | (e << 10) | (m >>> 13);
+}
+// Two land-field textures, interpolated from the old one to the new one
+const ftex = [null, null];
+let fromI = 0, toI = 0, morphT0 = -1e9, morphDur = MORPH_MS, FA = null, FB = null;
+function allocField() {
+  for (let i = 0; i < 2; i++) {
+    if (ftex[i]) gl.deleteTexture(ftex[i]);
+    ftex[i] = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, ftex[i]);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16F, Gw, Gh, 0, gl.RED, gl.HALF_FLOAT, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  }
+}
+function uploadField(i, Fd) {
+  const d = new Uint16Array(Gw * Gh);
+  for (let k = 0; k < d.length; k++) d[k] = toHalf(Fd.s[k]);
+  gl.bindTexture(gl.TEXTURE_2D, ftex[i]);
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1); // Odd-width R16F rows are uploaded as packed data too
+  gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, Gw, Gh, gl.RED, gl.HALF_FLOAT, d);
+}
+
+const iconRects = () => icons.map(ic => ({ cx: ic.x + ic.w / 2, cy: ic.y + ic.h / 2, hw: ic.w / 2 - 4, hh: ic.h / 2 - 2 }));
+function commit(fromEmpty = false) {
+  const nf = computeField(iconRects());
+  const target = 1 - toI;
+  if (fromEmpty) { FA = { s: new Float32Array(Gw * Gh).fill(26) }; uploadField(toI, FA); }   // Opening: start as one sheet of land (just above the coastline undulation), and the sea slowly spreads out from the icons
+  else FA = FB;
+  FB = nf;
+  uploadField(target, FB);
+  fromI = toI; toI = target;
+  morphT0 = performance.now();
+  morphDur = fromEmpty ? 2600 : MORPH_MS;
+}
+function refresh() {
+  FA = FB = computeField(iconRects());
+  uploadField(toI, FB);
+  fromI = toI; morphT0 = -1e9;
+}
+
+/* ======================================================================
+   Current field (blends from the old texture to the new one while icons move)
+   ====================================================================== */
+let curMix = 1;
+const curS = (x, y) => FB ? sampleArr(FA.s, x, y) * (1 - curMix) + sampleArr(FB.s, x, y) * curMix : 999;
+
+/* ======================================================================
+   World: an old sea chart. Sea surrounds the icons, and everywhere else is land.
+   Land art (ranges, woods, small mounds, rivers, lakes, place names, compass) is laid out for the settled icons, drawn on a 2D canvas, and uploaded as a texture. It is redrawn only when icons move,
+   and the old and new textures swap in patches. The coastline and the sea waterlines are drawn by the shader from the field and follow it smoothly. Ships are drawn each frame on the sea and bob up and down.
+   2D canvas colors: red = paper underlay (covers lines behind it), green = ink drawn only on land, blue = ink drawn everywhere (see the shader)
+   ====================================================================== */
+const LAND_M = 20;                                         // Mountains, trees, and letters stay at least this far from the coast (measured on the field): the coastline has ±15px of hand-drawn undulation
+let world = null;
+let worldHold = WALL || PREVIEW;                           // In wallpaper or preview mode the icon positions are still unknown, so there is only a blank sheet at first
+const rnd1 = (x, y, k) => hash2(x, y, k);                  // A stable random value (it changes together with the seed)
+const sTarget = (x, y) => FB ? sampleArr(FB.s, x, y) : 999;   // Sample the settled field
+const isLand = (x, y, m = LAND_M) => sTarget(x, y) > m;
+const sstep = (a, b, x) => { const t = Math.min(Math.max((x - a) / (b - a), 0), 1); return t * t * (3 - 2 * t); };
+const RED = '#f00', GREEN = '#0f0', BLUE = '#00f';
+const SERIF = '"Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif';
+const FONT_R = 'italic 600 18px ' + SERIF, FONT_P = 'italic 13px ' + SERIF;
+const REGIONS = ['TERRA INCOGNITA', 'REGNUM AUREUM', 'TERRA AUSTRALIS', 'MAGNA PROVINCIA', 'TERRA NOVA', 'TERRA BOREALIS', 'IMPERIUM MAGNUM', 'REGIO DESERTA', 'CAMPUS SERENUS', 'VALLIS LONGA', 'REGIO VENTOSA', 'TERRA ARGENTEA', 'CAMPUS VIRIDIS', 'VALLIS AUREA'];
+// Small place names: mountains (m), woods (w), coast (c), plains (p)
+const PLACES = {
+  m: ['Montes Lunae', 'Mons Ventosus', 'Montes Ferrei', 'Alpes Magni', 'Montes Nivei'],
+  w: ['Silva Antiqua', 'Silva Nigra', 'Silva Viridis', 'Nemus Obscurum'],
+  c: ['Promontorium', 'Portus Felix', 'Ora Aurea', 'Litus Longum'],
+  p: ['Vallis Viridis', 'Campi Aurei', 'Colles Rubri', 'Terra Florida', 'Fons Clarus', 'Arva Felicia', 'Campi Sereni', 'Vallis Serena', 'Prata Longa', 'Fons Antiquus', 'Terra Serena', 'Colles Aurei', 'Vallis Alba', 'Prata Viridia', 'Campi Ventosi', 'Fons Argenteus'],
+};
+// Ranges sit near one noise contour (winding bands), then another noise layer cuts them into segments; woods are broad areas where the noise is high
+const mtnMask = (x, y) => (1 - sstep(0.02, 0.045, Math.abs(fbm(x * 0.0025, y * 0.0025, 31) - 0.49))) * sstep(0.4, 0.48, fbm(x * 0.0035, y * 0.0035, 33));
+const woodMask = (x, y) => sstep(0.545, 0.605, fbm(x * 0.0042 + 50, y * 0.0042, 47));
+// Hills are a wider band on both sides of the ranges; marsh is low land where another noise layer is high and the sea is close
+const hillMask = (x, y) => (1 - sstep(0.05, 0.09, Math.abs(fbm(x * 0.0025, y * 0.0025, 31) - 0.49))) * sstep(0.36, 0.46, fbm(x * 0.0035, y * 0.0035, 33)) * (1 - mtnMask(x, y));
+const marshMask = (x, y) => sstep(0.6, 0.66, fbm(x * 0.006 + 90, y * 0.006, 77));
+
+// Occupancy (8px cells): nothing else is drawn where the compass, lakes, rivers, and place names sit
+function makeOcc() {
+  const G = 8, gw = Math.ceil(W / G) + 1, gh = Math.ceil(H / G) + 1, a = new Uint8Array(gw * gh);
+  const each = (x0, y0, x1, y1, f) => {
+    for (let j = Math.max(0, Math.floor(y0 / G)); j <= Math.min(gh - 1, Math.floor(y1 / G)); j++)
+      for (let i = Math.max(0, Math.floor(x0 / G)); i <= Math.min(gw - 1, Math.floor(x1 / G)); i++) if (f(j * gw + i)) return true;
+    return false;
+  };
+  return {
+    mark(x0, y0, x1, y1, v = 1) { each(x0, y0, x1, y1, i => { if (!a[i]) a[i] = v; }); },
+    any(x0, y0, x1, y1) { return each(x0, y0, x1, y1, i => a[i] !== 0); },
+    at(x, y) { const i = Math.floor(x / G), j = Math.floor(y / G); return i < 0 || j < 0 || i >= gw || j >= gh ? 0 : a[j * gw + i]; },
+  };
+}
+
+// Distance to the sea (8px cells, two-pass chamfer distance; far from the icons the field is flat and cannot tell near from far). Picture edges also count as outlets, a bit farther out, so a river can flow off the picture
+function seaDistance() {
+  const G = 8, gw = Math.ceil(W / G) + 1, gh = Math.ceil(H / G) + 1, d = new Float32Array(gw * gh), A = G, B = G * Math.SQRT2;
+  for (let j = 0; j < gh; j++) for (let i = 0; i < gw; i++)
+    d[j * gw + i] = sTarget(i * G, j * G) < 0 ? 0 : (i === 0 || j === 0 || i === gw - 1 || j === gh - 1) ? 160 : 1e9;
+  for (let j = 1; j < gh; j++) for (let i = 1; i < gw - 1; i++) {
+    const k = j * gw + i;
+    d[k] = Math.min(d[k], d[k - 1] + A, d[k - gw] + A, d[k - gw - 1] + B, d[k - gw + 1] + B);
+  }
+  for (let j = gh - 2; j >= 0; j--) for (let i = gw - 2; i >= 1; i--) {
+    const k = j * gw + i;
+    d[k] = Math.min(d[k], d[k + 1] + A, d[k + gw] + A, d[k + gw + 1] + B, d[k + gw - 1] + B);
+  }
+  return (x, y) => {
+    const fx = Math.min(Math.max(x / G, 0), gw - 1.001), fy = Math.min(Math.max(y / G, 0), gh - 1.001);
+    const ix = Math.floor(fx), iy = Math.floor(fy), tx = fx - ix, ty = fy - iy, k = iy * gw + ix;
+    return (d[k] * (1 - tx) + d[k + 1] * tx) * (1 - ty) + (d[k + gw] * (1 - tx) + d[k + gw + 1] * tx) * ty;
+  };
+}
+
+/* ---- Layout: compass, lakes, rivers, place names, mountains, and trees (all for the settled field; a compass or name that still fits is kept, so they do not jump around) ---- */
+function planWorld(prev) {
+  if (prev && prev.seed !== seed) prev = null;
+  const occ = makeOcc(), w = { fb: FB, W, H, seed, roses: [], lakes: [], rivers: [], labels: [], towns: [], roads: [], bridges: [], fields: [], glyphs: [], ships: prev ? prev.ships : [], shipN: -1 };
+  let land = 0;
+  const sea = seaDistance();
+  for (let y = 20; y < H - TASKBAR; y += 40) for (let x = 20; x < W; x += 40) if (isLand(x, y, 0)) land += 1600;
+
+  // ---- Compass: prefer land near a corner of the picture, with some margin from the coast. ----
+  const cornerDistance = (x, y) => Math.hypot(Math.min(x, W - x), Math.min(y, H - TASKBAR - y));
+  const roseOK = (x, y, r, others) => {
+    if (x < r + 30 || x > W - r - 30 || y < r + 40 || y > H - TASKBAR - r - 26 || sTarget(x, y) < r + 26) return false;
+    if (others.some(o => Math.hypot(o.x - x, o.y - y) < 560)) return false;
+    for (let k = 0; k < 16; k++) { const a = k * Math.PI / 8; if (!isLand(x + Math.cos(a) * (r + 14), y + Math.sin(a) * (r + 14), 16)) return false; }
+    return true;
+  };
+  const nRose = land > 1.3e6 ? 2 : 1;
+  if (prev) for (const R of prev.roses) if (w.roses.length < nRose && cornerDistance(R.x,R.y) < Math.min(W,H-TASKBAR)*.28 && roseOK(R.x, R.y, R.r, w.roses)) w.roses.push(R);
+  for (const r of [46, 38, 34, 30]) {
+    if (w.roses.length >= nRose) break;
+    if (w.roses.length && r > 38) continue;                  // The second one is a little smaller
+    let best = null, bs = -1e9;
+    for (let y = 40; y < H - TASKBAR; y += 24) for (let x = 40; x < W; x += 24) {
+      if (!roseOK(x, y, r, w.roses)) continue;
+      const sc = -cornerDistance(x,y) + rnd1(x, y, 501 + w.roses.length) * 8;
+      if (sc > bs) { bs = sc; best = { x, y, r }; }
+    }
+    if (best) w.roses.push(best);
+  }
+  for (const R of w.roses) occ.mark(R.x - R.r - 18, R.y - R.r - 30, R.x + R.r + 18, R.y + R.r + 14);
+
+  // ---- Lakes: a few, in deeper inland ----
+  const nLake = Math.min(5, Math.round(land / 800000 + rnd1(1, 2, 510)));
+  const lakeC = [];
+  for (let y = 60; y < H - TASKBAR - 40; y += 36) for (let x = 60; x < W - 60; x += 36) {
+    const jx = x + (rnd1(x, y, 511) - 0.5) * 30, jy = y + (rnd1(x, y, 512) - 0.5) * 30;
+    if (sea(jx, jy) > 90 && mtnMask(jx, jy) < 0.3) lakeC.push([jx, jy, rnd1(x, y, 513)]);
+  }
+  lakeC.sort((a, b) => a[2] - b[2]);
+  for (const [x, y, u] of lakeC) {
+    if (w.lakes.length >= nLake) break;
+    const r = 13 + 13 * rnd1(Math.round(x), Math.round(y), 514), ry = r * 0.7;
+    if (occ.any(x - r - 14, y - ry - 14, x + r + 14, y + ry + 14) || sea(x, y) < r + 50) continue;
+    if (w.lakes.some(L => Math.hypot(L.x - x, L.y - y) < 260)) continue;
+    const ph = [0, 1, 2].map(k => rnd1(Math.round(x), Math.round(y), 520 + k) * 6.28);
+    w.lakes.push({ x, y, r, ph });
+    occ.mark(x - r - 6, y - ry - 6, x + r + 6, y + ry + 6, 2);
+  }
+
+  // ---- Rivers: a branching network with graded width, a winding trunk, and several tributaries. ----
+  const riv = planContinentRivers(w, occ, sea, land);
+
+  // ---- Place names: large ones (regions, capitals, wide letter spacing) go in deeper inland; small ones sit by mountains, woods, the coast, or plains and are named for that place; leave clear space around the letters ----
+  const mctx = ovCv.getContext('2d');
+  const boxOK = L => {
+    const hx = L.tw / 2 + 8, hy = L.fs * 0.62 + 4;
+    if (L.x - hx < 14 || L.x + hx > W - 14 || L.y - hy < 14 || L.y + hy > H - TASKBAR - 10) return false;
+    for (let y = -hy; y <= hy + 0.1; y += hy) for (let x = -hx; x <= hx + 0.1; x += Math.min(14, hx)) if (!isLand(L.x + x, L.y + y, 20)) return false;
+    return !occ.any(L.x - hx, L.y - hy, L.x + hx, L.y + hy);
+  };
+  const mk = (text, big, x, y) => {
+    mctx.font = big ? FONT_R : FONT_P; mctx.letterSpacing = big ? '5px' : '0.5px';
+    return { text, big, x, y, fs: big ? 18 : 13, tw: mctx.measureText(text).width, rot: (rnd1(Math.round(x), Math.round(y), 550) - 0.5) * 0.08 };
+  };
+  const take = L => { w.labels.push(L); occ.mark(L.x - L.tw / 2 - 30, L.y - L.fs - 18, L.x + L.tw / 2 + 30, L.y + L.fs + 18, 4); };
+  if (prev) for (const L of prev.labels) if (!L.open && boxOK(L)) take(L);
+  const used = new Set(w.labels.map(L => L.text));
+  const shuffle = (a, k) => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rnd1(i, k, 560) * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+  const near = (f, x, y) => Math.max(f(x, y), f(x - 50, y), f(x + 50, y), f(x, y - 30), f(x, y + 30));
+  const fitK = {
+    R: (x, y) => true,
+    m: (x, y) => near(mtnMask, x, y) > 0.5, w: (x, y) => near(woodMask, x, y) > 0.5,
+    c: (x, y) => sea(x, y) < 70, p: (x, y) => near(mtnMask, x, y) < 0.2 && near(woodMask, x, y) < 0.2,
+  };
+  const pools = { R: shuffle(REGIONS.slice(), 1), m: shuffle(PLACES.m.slice(), 2), w: shuffle(PLACES.w.slice(), 3), c: shuffle(PLACES.c.slice(), 4), p: shuffle(PLACES.p.slice(), 5) };
+  const nBig = Math.max(1, Math.min(3, Math.round(land / 900000))), nSmall = Math.max(1, Math.min(6, Math.round(land / 380000)));
+  const order = Array(nBig).fill('R').concat(shuffle(['m', 'w', 'p', 'c', 'm', 'w', 'p', 'c', 'p'], 6));
+  let haveBig = w.labels.filter(L => L.big).length, haveSmall = w.labels.length - haveBig;
+  for (const k of order) {
+    const big = k === 'R';
+    if (big ? haveBig >= nBig : haveSmall >= nSmall) continue;
+    const text = pools[k].find(t => !used.has(t));
+    if (!text) continue;
+    let best = null, bs = -1e9;
+    for (let y = 30; y < H - TASKBAR - 20; y += 26) for (let x = 40; x < W - 40; x += 32) {
+      const L = mk(text, big, x + (rnd1(x, y, 561) - 0.5) * 20, y);
+      if (!boxOK(L) || !fitK[k](L.x, L.y)) continue;
+      const sc = (big ? Math.min(sea(L.x, L.y), 260) : 0) + rnd1(x, y, 562 + haveSmall) * 120;
+      if (sc > bs) { bs = sc; best = L; }
+    }
+    if (!best) continue;
+    take(best); used.add(text);
+    if (big) haveBig++; else haveSmall++;
+  }
+
+  // ---- Towns: a few small castles and villages by a river or the coast ----
+  const nTown = Math.max(2, Math.min(7, Math.round(land / 240000)));
+  const tc = [];
+  w.rivers.forEach((pts, ri) => {
+    for (let i = 10; i < pts.length - 6; i += 6) {
+      const [x, y] = pts[i], side = rnd1(i, ri, 580) < 0.5 ? -1 : 1;
+      tc.push([x + side * 22, y + 4, rnd1(i, ri, 581) * 0.6]);
+    }
+  });
+  for (let y = 40; y < H - TASKBAR - 20; y += 30) for (let x = 30; x < W - 30; x += 30) {
+    const d = sea(x, y);
+    if (d > 28) tc.push([x, y, (d < 70 ? 0.3 : 0.6) + rnd1(x, y, 582) * 0.5]);
+  }
+  tc.sort((a, b) => a[2] - b[2]);
+  for (const [x, y] of tc) {
+    if (w.towns.length >= nTown) break;
+    if (!isLand(x - 44, y, 30) || !isLand(x + 44, y, 30) || !isLand(x, y - 62, 30) || !isLand(x, y + 24, 30) || occ.any(x - 46, y - 64, x + 46, y + 22)) continue;
+    if (w.towns.some(t => Math.hypot(t.x - x, t.y - y) < 240)) continue;
+    w.towns.push({ x, y, v: rnd1(Math.round(x), Math.round(y), 584), name: CONTINENT_TOWN_NAMES[w.towns.length] });
+    occ.mark(x - 48, y - 65, x + 48, y + 24, 5);
+  }
+
+  // Plan dashed land routes between towns that avoid the sea, lakes, and text, and place small bridges on the rivers.
+  const T = w.towns;
+  planContinentRoutes(w, occ, riv, prev);
+
+  // ---- Fields: a few small plots beside each town, with furrows ----
+  for (const t of T) {
+    const n = 2 + Math.floor(rnd1(Math.round(t.x), Math.round(t.y), 600) * 3);
+    let got = 0;
+    for (let k = 0; k < 16 && got < n; k++) {
+      const u = q => rnd1(Math.round(t.x) + k * 17, Math.round(t.y), 601 + q);
+      const ang = u(1) * 6.283, dist = 26 + u(2) * 18;
+      const x = t.x + Math.cos(ang) * dist, y = t.y - 4 + Math.sin(ang) * dist * 0.65;
+      const hw = 6 + u(3) * 4, hh = 3.5 + u(4) * 2.5, a = (u(5) - 0.5) * 0.5;
+      if (!isLand(x - hw, y, 14) || !isLand(x + hw, y, 14) || occ.any(x - hw - 1, y - hh - 1, x + hw + 1, y + hh + 1)) continue;
+      w.fields.push({ x, y, hw, hh, a, dir: u(6) < 0.5 ? 0 : 1 });
+      occ.mark(x - hw - 2, y - hh - 2, x + hw + 2, y + hh + 2, 7);
+      got++;
+    }
+  }
+
+  // ---- Landmarks: lighthouses on the coast, windmills beside villages, and scattered ruins ----
+  const lmFree = (x, y, hw, h, m = 20) => isLand(x - hw, y, m) && isLand(x + hw, y, m) && isLand(x, y - h, m) && !occ.any(x - hw - 2, y - h - 2, x + hw + 2, y + 3);
+  const lms = (k, x, y, hw, h, extra) => { w.glyphs.push(Object.assign({ k, x, y }, extra)); occ.mark(x - hw - 3, y - h - 3, x + hw + 3, y + 4, 8); };
+  const nLight = Math.max(1, Math.min(2, Math.round(land / 700000)));
+  const lc = [];
+  for (let y = 40; y < H - TASKBAR - 20; y += 12) for (let x = 20; x < W - 20; x += 12) { const d = sea(x, y); if (d > 20 && d < 44) lc.push([x, y, rnd1(x, y, 620)]); }
+  lc.sort((a, b) => a[2] - b[2]);
+  const lights = [];
+  for (const [x, y] of lc) {
+    if (lights.length >= nLight) break;
+    if (!lmFree(x, y, 6, 20) || lights.some(p => Math.hypot(p[0] - x, p[1] - y) < 400)) continue;
+    lights.push([x, y]); lms('L', x, y, 6, 20);
+  }
+  for (const t of T) {
+    if (rnd1(Math.round(t.x), Math.round(t.y), 630) > 0.7) continue;
+    for (let k = 0; k < 10; k++) {
+      const u = q => rnd1(Math.round(t.x) + k * 13, Math.round(t.y), 631 + q);
+      const x = t.x + (u(1) < 0.5 ? -1 : 1) * (28 + u(2) * 16), y = t.y + (u(3) - 0.5) * 24;
+      if (!lmFree(x, y, 7, 16, 14)) continue;
+      lms('D', x, y, 7, 16, { a: u(4) * 1.57 });
+      break;
+    }
+  }
+  const nRuin = Math.max(1, Math.min(3, Math.round(land / 600000)));
+  for (let k = 0, got = 0; k < 400 && got < nRuin; k++) {
+    const x = 30 + rnd1(k, 1, 640) * (W - 60), y = 40 + rnd1(k, 2, 640) * (H - TASKBAR - 70);
+    if (sea(x, y) < 60 || mtnMask(x, y) > 0.2 || woodMask(x, y) > 0.3 || !lmFree(x, y, 10, 12, 30)) continue;
+    lms('U', x, y, 10, 12); got++;
+  }
+
+  // ---- Mountains, woods, hills, marsh, and scattered mounds and grass: sprinkle them on staggered grids, and draw the farther ones first ----
+  const free = (x0, y0, x1, y1, m) => !occ.any(x0, y0, x1, y1) && isLand(x0, y1, m) && isLand(x1, y1, m) && isLand((x0 + x1) / 2, y0, m);
+  for (let j = -1; j * 19 < H + 30; j++) for (let i = -1; i * 28 < W + 30; i++) {           // Mountains: triangular peaks joined into ranges
+    const r = k => rnd1(i, j, 600 + k);
+    const x = (i + 0.5 + (j & 1) * 0.5 + (r(1) - 0.5) * 0.45) * 28, y = (j + 0.5 + (r(2) - 0.5) * 0.3) * 19;
+    const m = mtnMask(x, y);
+    if (r(3) > m * 0.95) continue;
+    const big = m > 0.85 && r(7) < 0.3, volc = !big && r(8) < 0.012;
+    const mw = (9 + 7 * r(4) * (0.6 + 0.4 * m)) * (big ? 1.35 : 1), mh = (14 + 15 * r(5) * (0.5 + 0.5 * m)) * (big ? 1.45 : volc ? 1.25 : 1);
+    if (!free(x - mw, y - mh - (volc ? 18 : 0), x + mw, y + 2, LAND_M)) continue;
+    w.glyphs.push({ k: 'm', x, y, w: mw, h: mh, a: volc ? 0 : (r(6) - 0.5) * 0.5, snow: mh > 26, volc });
+  }
+  for (let j = -1; j * 9 < H + 20; j++) for (let i = -1; i * 11 < W + 20; i++) {            // Woods: one small tree at a time
+    const r = k => rnd1(i, j, 700 + k);
+    const x = (i + 0.5 + (j & 1) * 0.5 + (r(1) - 0.5) * 0.6) * 11, y = (j + 0.5 + (r(2) - 0.5) * 0.5) * 9;
+    const m = woodMask(x, y) * (1 - sstep(0.15, 0.4, mtnMask(x, y)));
+    if (r(3) > m * 0.7) continue;
+    const s = 0.8 + 0.45 * r(4);
+    if (!free(x - 4 * s, y - 11 * s, x + 4 * s, y + 1, 14)) continue;
+    w.glyphs.push({ k: r(5) < 0.7 ? 'c' : 'o', x, y, s });
+  }
+  for (let j = 0; j * 20 < H + 20; j++) for (let i = 0; i * 26 < W + 20; i++) {              // Hills at the foot of the mountains
+    const r = k => rnd1(i, j, 850 + k);
+    const x = (i + 0.2 + 0.6 * r(2)) * 26, y = (j + 0.3 + 0.5 * r(3)) * 20;
+    if (r(1) > hillMask(x, y) * 0.6) continue;
+    const s = 1.05 + 0.5 * r(4);
+    if (!free(x - 8 * s, y - 6 * s, x + 8 * s, y + 2, 16)) continue;
+    w.glyphs.push({ k: 'h', x, y, s });
+  }
+  for (let j = 0; j * 10 < H + 10; j++) for (let i = 0; i * 15 < W + 10; i++) {              // Marsh: clumps of reeds
+    const r = k => rnd1(i, j, 870 + k);
+    const x = (i + 0.5 + (j & 1) * 0.5 + (r(1) - 0.5) * 0.6) * 15, y = (j + 0.5 + (r(2) - 0.5) * 0.5) * 10;
+    if (sea(x, y) > 120 || mtnMask(x, y) > 0.05 || woodMask(x, y) > 0.2 || r(3) > marshMask(x, y) * 0.4) continue;
+    const s = 0.85 + 0.35 * r(4);
+    if (!free(x - 5 * s, y - 4 * s, x + 5 * s, y + 3, 16)) continue;
+    w.glyphs.push({ k: 'w', x, y, s });
+  }
+  for (let j = 0; j * 44 < H; j++) for (let i = 0; i * 64 < W; i++) {                       // A few scattered trees on the plains
+    const r = k => rnd1(i, j, 880 + k);
+    if (r(1) > 0.16) continue;
+    const cx = (i + 0.2 + 0.6 * r(2)) * 64, cy = (j + 0.3 + 0.5 * r(3)) * 44;
+    if (mtnMask(cx, cy) > 0.1 || woodMask(cx, cy) > 0.1) continue;
+    const n = 2 + Math.floor(r(4) * 3);
+    for (let k = 0; k < n; k++) {
+      const x = cx + (r(10 + k) - 0.5) * 18, y = cy + (r(20 + k) - 0.5) * 8, s = 0.85 + 0.35 * r(30 + k);
+      if (free(x - 4 * s, y - 11 * s, x + 4 * s, y + 1, 14)) w.glyphs.push({ k: r(40 + k) < 0.5 ? 'c' : 'o', x, y, s });
+    }
+  }
+  for (let j = 0; j * 30 < H; j++) for (let i = 0; i * 42 < W; i++) {                       // Scattered small mounds and a tuft of grass
+    const r = k => rnd1(i, j, 800 + k);
+    if (r(1) > 0.2) continue;
+    const x = (i + 0.2 + 0.6 * r(2)) * 42, y = (j + 0.3 + 0.5 * r(3)) * 30;
+    if (mtnMask(x, y) > 0.1 || woodMask(x, y) > 0.1 || hillMask(x, y) > 0.3 || marshMask(x, y) > 0.3 || !free(x - 9, y - 7, x + 9, y + 2, 14)) continue;
+    w.glyphs.push({ k: r(4) < 0.55 ? 'h' : 'g', x, y, s: 0.8 + 0.4 * r(5) });
+  }
+  w.glyphs.sort((a, b) => a.y - b.y);
+  // ---- Names for open ground: once woods, towns, and roads are placed, fill large stretches of land that are truly empty. ----
+  const details=makeOcc();
+  for(const g of w.glyphs){
+    const s=g.s||1;
+    if(g.k==='m')details.mark(g.x-g.w-3,g.y-g.h-4,g.x+g.w+3,g.y+4);
+    else if(g.k==='c'||g.k==='o')details.mark(g.x-5*s,g.y-12*s,g.x+5*s,g.y+3);
+    else if(g.k==='h')details.mark(g.x-9*s,g.y-7*s,g.x+9*s,g.y+3);
+  }
+  const openScore=L=>{
+    if(!boxOK(L))return -1;
+    const hx=L.tw*.5+7,hy=L.fs*.65+9;
+    if(details.any(L.x-hx,L.y-hy,L.x+hx,L.y+hy))return -1;
+    if(w.labels.some(other=>Math.hypot(L.x-other.x,L.y-other.y)<(L.big||other.big?230:180)))return -1;
+    // Besides the letters themselves, also check a wide area around them. Scattered grass does not spoil the open space.
+    const rx=Math.max(115,L.tw*.65),ry=66;let free=0,total=0;
+    for(let dy=-ry;dy<=ry;dy+=22)for(let dx=-rx;dx<=rx;dx+=24){
+      total++;const x=L.x+dx,y=L.y+dy;
+      if(x>20&&x<W-20&&y>20&&y<H-TASKBAR-20&&isLand(x,y,12)&&!occ.at(x,y)&&!details.at(x,y))free++;
+    }
+    const openness=free/total;if(openness<.79)return -1;
+    const separation=w.labels.length?Math.min(...w.labels.map(other=>Math.hypot(L.x-other.x,L.y-other.y))):400;
+    return openness*200+Math.min(450,separation)*.25;
+  };
+  const openTarget=Math.min(8,Math.max(2,Math.round(land/210000)));
+  let openCount=0,openBig=0;
+  if(prev)for(const L of prev.labels){
+    if(!L.open||used.has(L.text)||openCount>=openTarget||openScore(L)<0)continue;
+    take(L);used.add(L.text);openCount++;if(L.big)openBig++;
+  }
+  const openNames=shuffle(REGIONS.slice(),71).map(text=>({text,big:true})).concat(shuffle(PLACES.p.slice(),72).map(text=>({text,big:false})));
+  for(const name of openNames){
+    if(openCount>=openTarget)break;
+    if(used.has(name.text)||(name.big&&openBig>=2))continue;
+    let best=null,score=-1;
+    for(let y=80;y<H-TASKBAR-60;y+=30)for(let x=100;x<W-90;x+=34){
+      const L=mk(name.text,name.big,x+(rnd1(x,y,1260)-.5)*18,y+(rnd1(x,y,1261)-.5)*12);
+      const fit=openScore(L);if(fit<0)continue;
+      const rank=fit+rnd1(x,y,1262+openCount)*28;
+      if(rank>score){score=rank;best=L;}
+    }
+    if(!best)continue;
+    best.open=true;take(best);used.add(best.text);openCount++;if(best.big)openBig++;
+  }
+  planShips(w, prev);
+  return w;
+}
+
+/* ---- Ships: at sea, a bit away from the icons and from shore; keep any that still fit ---- */
+function shipOK(x, y) {
+  if (x < 30 || x > W - 30 || y < 50 || y > H - TASKBAR - 16) return false;
+  for (const [dx, dy] of [[0, 0], [-22, 0], [22, 0], [0, -36], [-16, -20], [16, -20]]) if (sTarget(x + dx, y + dy) > -20) return false;
+  for (const ic of icons)
+    if (x + 26 > ic.x - 4 && x - 26 < ic.x + ic.w + 4 && y + 6 > ic.y - 4 && y - 42 < ic.y + ic.h + 4) return false;
+  return true;
+}
+function planShips(w, prev) {
+  const n = P.ships | 0, old = prev ? prev.ships : [];
+  const keep = [];
+  for (const s of old) if (s.want && keep.length < n && shipOK(s.x, s.y)) keep.push(s); else s.want = false;
+  const cands = [];
+  for (let y = 44; y < H - TASKBAR - 16; y += 14) for (let x = 28; x < W - 28; x += 14) if (shipOK(x, y)) cands.push([x, y, rnd1(x, y, 900)]);
+  cands.sort((a, b) => a[2] - b[2]);
+  const delay = Math.max(0, (morphT0 + morphDur - performance.now()) / 1000 * 0.8);   // While the sea is still spreading at the opening, appear a little later
+  for (const [x, y, u] of cands) {
+    if (keep.length >= n) break;
+    if (keep.some(s => Math.hypot(s.x - x, s.y - y) < 170)) continue;
+    keep.push({ x, y, dir: u < 0.5 ? -1 : 1, ph: u * 40, a: 0, want: true, delay });
+  }
+  w.ships = keep.concat(old.filter(s => !s.want && s.a > 0));
+  w.shipN = n;
+}
+
+/* ---- Paint: all land art is drawn on this canvas (in the canvas device pixels) ---- */
+const ovCv = document.createElement('canvas');
+function paintMountain(ctx, g) {
+  const { x, y, w: mw, h } = g, ax = x + g.a * mw, ay = y - h, lx = x - mw, rx = x + mw;
+  const outline = () => {
+    ctx.beginPath(); ctx.moveTo(lx, y);
+    ctx.quadraticCurveTo(lx + (ax - lx) * 0.55 + 1.2, y - h * 0.52, ax, ay);
+    ctx.quadraticCurveTo(ax + (rx - ax) * 0.45 + 1.4, y - h * 0.5, rx, y);
+  };
+  outline(); ctx.closePath(); ctx.fillStyle = RED; ctx.fill();
+  ctx.save(); ctx.clip();                                     // Shaded face (the right side): hatching parallel to the left slope
+  ctx.beginPath(); ctx.moveTo(ax, ay - 1); ctx.lineTo(x + mw * 0.2, y + 1); ctx.lineTo(rx + 2, y + 1); ctx.lineTo(rx + 2, ay - 2); ctx.closePath(); ctx.clip();
+  ctx.beginPath();
+  const k = (lx - ax) / h;
+  for (let t = ax - 2; t < rx + (ax - lx) + 2; t += 2.3) { ctx.moveTo(t, ay - 2); ctx.lineTo(t + k * (h + 4), y + 2); }
+  ctx.strokeStyle = GREEN; ctx.lineWidth = 0.6; ctx.stroke();
+  ctx.restore();
+  if (g.snow || g.volc) {                                     // Summit: snow (a jagged line, with no hatching above it) or a crater
+    const t = g.volc ? 0.16 : 0.3, sy = ay + h * t, lxs = ax + (lx - ax) * t + 0.6, rxs = ax + (rx - ax) * t + 1.0;
+    const zig = () => { for (let i = 1; i < 5; i++) ctx.lineTo(lxs + (rxs - lxs) * i / 5, sy + (g.volc ? 0 : i % 2 ? 2.4 : -0.4)); ctx.lineTo(rxs, sy); };
+    ctx.beginPath(); ctx.moveTo(ax, ay - 1); ctx.lineTo(lxs - 0.4, sy); zig(); ctx.closePath(); ctx.fillStyle = RED; ctx.fill();
+    ctx.beginPath(); ctx.moveTo(lxs, sy); zig(); ctx.strokeStyle = GREEN; ctx.lineWidth = 0.7; ctx.stroke();
+  }
+  outline(); ctx.strokeStyle = GREEN; ctx.lineWidth = 1.15; ctx.stroke();
+  if (g.volc) {                                               // Volcano: a flat rim, and puffs of smoke drifting up and to the right
+    const cy = ay + h * 0.16, hw = (rx - lx) * 0.08;
+    ctx.beginPath(); ctx.ellipse(ax + 0.8, cy, hw + 1, 1.4, 0, 0, Math.PI * 2); ctx.fillStyle = RED; ctx.fill(); ctx.lineWidth = 0.8; ctx.stroke();
+    for (const [dx, dy, r] of [[1, -4, 2.2], [3.5, -8.5, 2.9], [7.5, -13, 3.5]]) {
+      ctx.beginPath(); ctx.arc(ax + dx, cy + dy, r, 0, Math.PI * 2); ctx.fillStyle = RED; ctx.fill(); ctx.lineWidth = 0.7; ctx.stroke();
+    }
+  }
+}
+function paintConifer(ctx, g) {
+  const { x, y, s } = g;
+  ctx.beginPath(); ctx.moveTo(x, y - 2 * s); ctx.lineTo(x, y + 0.6); ctx.strokeStyle = GREEN; ctx.lineWidth = 0.9; ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x - 3.5 * s, y - 2 * s); ctx.lineTo(x, y - 10.5 * s); ctx.lineTo(x + 3.5 * s, y - 2 * s); ctx.closePath();
+  ctx.fillStyle = RED; ctx.fill(); ctx.lineWidth = 0.85; ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x, y - 10.5 * s); ctx.lineTo(x + 3.5 * s, y - 2 * s); ctx.lineTo(x, y - 2 * s); ctx.closePath();
+  ctx.globalAlpha = 0.5; ctx.fillStyle = GREEN; ctx.fill(); ctx.globalAlpha = 1;
+}
+function paintRoundTree(ctx, g) {
+  const { x, y, s } = g, cy = y - 5.6 * s, r = 3 * s;
+  ctx.beginPath(); ctx.moveTo(x, cy + r * 0.6); ctx.lineTo(x, y + 0.6); ctx.strokeStyle = GREEN; ctx.lineWidth = 0.9; ctx.stroke();
+  ctx.beginPath(); ctx.arc(x, cy, r, 0, Math.PI * 2); ctx.fillStyle = RED; ctx.fill(); ctx.lineWidth = 0.85; ctx.stroke();
+  ctx.beginPath(); ctx.arc(x, cy, r, -Math.PI * 0.35, Math.PI * 0.65); ctx.closePath();
+  ctx.globalAlpha = 0.5; ctx.fillStyle = GREEN; ctx.fill(); ctx.globalAlpha = 1;
+}
+function paintHill(ctx, g) {
+  const { x, y, s } = g, r = 7 * s;
+  ctx.beginPath(); ctx.arc(x, y + r * 0.55, r, Math.PI * 1.17, Math.PI * 1.83);
+  ctx.strokeStyle = GREEN; ctx.lineWidth = 0.9; ctx.stroke();
+  ctx.beginPath();
+  for (let i = 0; i < 3; i++) { const hx = x + (1.5 + i * 2) * s; ctx.moveTo(hx, y - r * 0.32 + i * 0.9 * s); ctx.lineTo(hx - 1.4 * s, y + 0.2); }
+  ctx.lineWidth = 0.55; ctx.stroke();
+}
+function paintGrass(ctx, g) {
+  const { x, y, s } = g;
+  ctx.beginPath();
+  for (let i = -1; i <= 1; i++) { ctx.moveTo(x + i * 2.2 * s, y); ctx.lineTo(x + i * 3.2 * s, y - (4 - Math.abs(i)) * s); }
+  ctx.strokeStyle = GREEN; ctx.lineWidth = 0.7; ctx.stroke();
+}
+function paintLake(ctx, L) {
+  const path = f => {
+    ctx.beginPath();
+    for (let i = 0; i <= 48; i++) {
+      const a = i / 48 * Math.PI * 2, rr = L.r * f * (1 + 0.2 * Math.sin(2 * a + L.ph[0]) + 0.12 * Math.sin(3 * a + L.ph[1]) + 0.07 * Math.sin(5 * a + L.ph[2]));
+      const px = L.x + Math.cos(a) * rr, py = L.y + Math.sin(a) * rr * 0.7;
+      i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+    }
+    ctx.closePath();
+  };
+  path(1); ctx.fillStyle = RED; ctx.fill();
+  ctx.save(); ctx.clip();                                     // Lake surface: rows of horizontal lines
+  ctx.beginPath();
+  for (let y = L.y - L.r; y < L.y + L.r; y += 2.6) { ctx.moveTo(L.x - L.r * 1.5, y); ctx.lineTo(L.x + L.r * 1.5, y); }
+  ctx.globalAlpha = 0.45; ctx.strokeStyle = GREEN; ctx.lineWidth = 0.5; ctx.stroke(); ctx.globalAlpha = 1;
+  ctx.restore();
+  path(0.78); ctx.strokeStyle = GREEN; ctx.globalAlpha = 0.6; ctx.lineWidth = 0.6; ctx.stroke(); ctx.globalAlpha = 1;
+  path(1); ctx.strokeStyle = GREEN; ctx.lineWidth = 1.3; ctx.stroke();
+}
+function paintRose(ctx, R) {
+  const { x, y, r } = R;
+  ctx.beginPath(); ctx.arc(x, y, r + 3, 0, Math.PI * 2); ctx.fillStyle = RED; ctx.fill();
+  ctx.strokeStyle = BLUE; ctx.fillStyle = BLUE;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.beginPath(); ctx.arc(x, y, r - 5, 0, Math.PI * 2); ctx.lineWidth = 0.8; ctx.stroke();
+  for (let k = 0; k < 32; k += 2) {                           // Outer ring: ticks that alternate dark and light
+    const a0 = k / 32 * Math.PI * 2, a1 = (k + 1) / 32 * Math.PI * 2;
+    ctx.beginPath(); ctx.arc(x, y, r - 0.6, a0, a1); ctx.arc(x, y, r - 4.4, a1, a0, true); ctx.closePath(); ctx.fill();
+  }
+  ctx.beginPath(); ctx.arc(x, y, r * 0.34, 0, Math.PI * 2); ctx.lineWidth = 0.8; ctx.stroke();
+  // Points: sixteen small, eight medium, and four large ones for north, east, south, and west; half of each point is filled dark
+  const point = (ang, len, hw) => {
+    const dx = Math.cos(ang), dy = Math.sin(ang), tx = x + dx * len, ty = y + dy * len;
+    const lx = x - dy * hw, ly = y + dx * hw, rx = x + dy * hw, ry = y - dx * hw;
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(lx, ly); ctx.lineTo(tx, ty); ctx.closePath(); ctx.fillStyle = BLUE; ctx.fill();
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(tx, ty); ctx.lineTo(rx, ry); ctx.closePath(); ctx.fillStyle = RED; ctx.fill();
+    ctx.beginPath(); ctx.moveTo(lx, ly); ctx.lineTo(tx, ty); ctx.lineTo(rx, ry); ctx.lineWidth = 0.8; ctx.stroke();
+  };
+  for (let k = 0; k < 16; k++) point((k + 0.5) * Math.PI / 8, r * 0.52, r * 0.06);
+  for (let k = 0; k < 8; k++) point(k * Math.PI / 4 + Math.PI / 4, r * 0.72, r * 0.11);
+  for (let k = 0; k < 4; k++) point(k * Math.PI / 2 - Math.PI / 2, r * 0.97, r * 0.14);
+  ctx.beginPath(); ctx.arc(x, y, r * 0.07 + 0.6, 0, Math.PI * 2); ctx.fillStyle = BLUE; ctx.fill();
+  ctx.font = 'italic 600 15px ' + SERIF; ctx.letterSpacing = '0px'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.lineWidth = 4; ctx.strokeStyle = RED; ctx.strokeText('N', x, y - r - 11);
+  ctx.fillStyle = BLUE; ctx.fillText('N', x, y - r - 11);
+}
+function paintLabel(ctx, L) {
+  ctx.save(); ctx.translate(L.x, L.y); ctx.rotate(L.rot);
+  ctx.font = L.big ? FONT_R : FONT_P; ctx.letterSpacing = L.big ? '5px' : '0.5px';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.lineWidth = 6; ctx.strokeStyle = RED; ctx.strokeText(L.text, 0, 0);
+  ctx.fillStyle = BLUE; ctx.fillText(L.text, 0, 0);
+  ctx.restore();
+}
+function paintTown(ctx, t) { paintContinentTown(ctx, t); }
+function paintMarsh(ctx, g) {                                // Marsh: one waterline, a shorter one below it, and three reeds above
+  const { x, y, s } = g;
+  ctx.beginPath();
+  ctx.moveTo(x - 4 * s, y); ctx.lineTo(x + 4 * s, y);
+  ctx.moveTo(x - 2.4 * s, y + 2.2 * s); ctx.lineTo(x + 1.6 * s, y + 2.2 * s);
+  for (const [dx, h] of [[-2, 2.6], [0, 3.8], [2, 2.6]]) { ctx.moveTo(x + dx * s, y - 0.6); ctx.lineTo(x + dx * s * 1.3, y - h * s); }
+  ctx.strokeStyle = GREEN; ctx.lineWidth = 0.65; ctx.stroke();
+}
+function paintLighthouse(ctx, g) {                           // Lighthouse: a tall thin tower on a rock, two dark bands, and a lamp casting a few rays
+  const { x, y } = g;
+  ctx.strokeStyle = GREEN;
+  ctx.beginPath(); ctx.moveTo(x - 6.5, y + 0.6); ctx.quadraticCurveTo(x - 4, y - 3.2, x, y - 2.6); ctx.quadraticCurveTo(x + 4, y - 3.4, x + 6.5, y + 0.6); ctx.closePath();
+  ctx.fillStyle = RED; ctx.fill(); ctx.lineWidth = 0.8; ctx.stroke();
+  const tower = () => { ctx.beginPath(); ctx.moveTo(x - 3, y - 1.8); ctx.lineTo(x - 1.8, y - 14); ctx.lineTo(x + 1.8, y - 14); ctx.lineTo(x + 3, y - 1.8); ctx.closePath(); };
+  tower(); ctx.fillStyle = RED; ctx.fill();
+  ctx.save(); tower(); ctx.clip(); ctx.fillStyle = GREEN; ctx.globalAlpha = 0.7; ctx.fillRect(x - 4, y - 6.4, 8, 2.2); ctx.fillRect(x - 4, y - 11, 8, 2.2); ctx.restore(); ctx.globalAlpha = 1;
+  tower(); ctx.lineWidth = 0.85; ctx.stroke();
+  ctx.beginPath(); ctx.rect(x - 1.9, y - 17, 3.8, 3); ctx.fillStyle = RED; ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x - 2.4, y - 17); ctx.lineTo(x, y - 19.4); ctx.lineTo(x + 2.4, y - 17); ctx.closePath(); ctx.fillStyle = GREEN; ctx.fill();
+  ctx.beginPath();
+  for (const s of [-1, 1]) for (const a of [-0.35, 0, 0.35]) { const c = Math.cos(a) * s, d = Math.sin(a); ctx.moveTo(x + c * 3.4, y - 15.5 + d * 3.4); ctx.lineTo(x + c * 7, y - 15.5 + d * 7); }
+  ctx.lineWidth = 0.6; ctx.stroke();
+}
+function paintWindmill(ctx, g) {                             // Windmill: a tower, a pointed cap, and four sails
+  const { x, y, a } = g;
+  ctx.strokeStyle = GREEN;
+  ctx.beginPath(); ctx.moveTo(x - 3, y); ctx.lineTo(x - 2, y - 8); ctx.lineTo(x, y - 10.5); ctx.lineTo(x + 2, y - 8); ctx.lineTo(x + 3, y); ctx.closePath();
+  ctx.fillStyle = RED; ctx.fill(); ctx.lineWidth = 0.8; ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y - 2.6); ctx.lineWidth = 1.2; ctx.stroke();
+  const hx = x, hy = y - 8.4;
+  for (let k = 0; k < 4; k++) {
+    const b = a + k * Math.PI / 2, c = Math.cos(b), s = Math.sin(b);
+    ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(hx + c * 7.5, hy + s * 7.5); ctx.lineWidth = 0.7; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(hx + c * 2.2, hy + s * 2.2); ctx.lineTo(hx + c * 7.5, hy + s * 7.5); ctx.lineTo(hx + c * 7.5 - s * 1.8, hy + s * 7.5 + c * 1.8); ctx.lineTo(hx + c * 2.2 - s * 1.8, hy + s * 2.2 + c * 1.8); ctx.closePath();
+    ctx.fillStyle = RED; ctx.fill(); ctx.lineWidth = 0.55; ctx.stroke();
+  }
+  ctx.beginPath(); ctx.arc(hx, hy, 0.9, 0, Math.PI * 2); ctx.fillStyle = GREEN; ctx.fill();
+}
+function paintRuins(ctx, g) {                                // Ruins: broken columns on a base, with one length lying beside them
+  const { x, y } = g;
+  ctx.strokeStyle = GREEN; ctx.lineWidth = 0.75;
+  ctx.beginPath(); ctx.rect(x - 9, y - 1.6, 18, 1.6); ctx.fillStyle = RED; ctx.fill(); ctx.stroke();
+  for (const [dx, h, cut] of [[-6, 10, 0], [-2, 6.5, 1.6], [2, 11, 0], [6, 4, -1.4]]) {
+    ctx.beginPath(); ctx.moveTo(x + dx - 1.1, y - 1.6); ctx.lineTo(x + dx - 1.1, y - 1.6 - h - cut); ctx.lineTo(x + dx + 1.1, y - 1.6 - h + cut); ctx.lineTo(x + dx + 1.1, y - 1.6); ctx.closePath();
+    ctx.fillStyle = RED; ctx.fill(); ctx.stroke();
+    if (!cut) { ctx.beginPath(); ctx.moveTo(x + dx - 1.8, y - 1.6 - h); ctx.lineTo(x + dx + 1.8, y - 1.6 - h); ctx.stroke(); }
+  }
+  ctx.beginPath(); ctx.rect(x + 3, y + 0.8, 6, 2); ctx.fillStyle = RED; ctx.fill(); ctx.stroke();
+}
+function paintField(ctx, f) {                                // Field: one plot, with furrows
+  ctx.save(); ctx.translate(f.x, f.y); ctx.rotate(f.a);
+  ctx.beginPath(); ctx.rect(-f.hw, -f.hh, f.hw * 2, f.hh * 2); ctx.fillStyle = RED; ctx.fill();
+  ctx.save(); ctx.clip();
+  ctx.beginPath();
+  if (f.dir) for (let x = -f.hw + 1.6; x < f.hw; x += 1.9) { ctx.moveTo(x, -f.hh); ctx.lineTo(x, f.hh); }
+  else for (let y = -f.hh + 1.4; y < f.hh; y += 1.7) { ctx.moveTo(-f.hw, y); ctx.lineTo(f.hw, y); }
+  ctx.strokeStyle = GREEN; ctx.globalAlpha = 0.55; ctx.lineWidth = 0.55; ctx.stroke(); ctx.globalAlpha = 1;
+  ctx.restore();
+  ctx.beginPath(); ctx.rect(-f.hw, -f.hh, f.hw * 2, f.hh * 2); ctx.strokeStyle = GREEN; ctx.lineWidth = 0.75; ctx.stroke();
+  ctx.restore();
+}
+function paintRoad(ctx, pts) {                               // Road: one dashed line
+  ctx.beginPath(); pts.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y));
+  ctx.setLineDash([3.2, 2.4]); ctx.strokeStyle = GREEN; ctx.lineWidth = 0.85; ctx.globalAlpha = 0.85; ctx.stroke();
+  ctx.setLineDash([]); ctx.globalAlpha = 1;
+}
+function paintBridge(ctx, b) {                               // Small bridge: covers a stretch of the river, with two rails that arch slightly
+  ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(b.a);
+  const half=(b.span||12)*.5;
+  ctx.beginPath(); ctx.rect(-half, -2.5, half*2, 5); ctx.fillStyle = RED; ctx.fill();
+  ctx.beginPath(); ctx.moveTo(-half, -2.5); ctx.quadraticCurveTo(0, -4, half, -2.5); ctx.moveTo(-half, 2.5); ctx.quadraticCurveTo(0, 1, half, 2.5);
+  ctx.strokeStyle = GREEN; ctx.lineWidth = 0.9; ctx.stroke();
+  ctx.restore();
+}
+const PAINT = { m: paintMountain, c: paintConifer, o: paintRoundTree, h: paintHill, g: paintGrass, w: paintMarsh, L: paintLighthouse, D: paintWindmill, U: paintRuins };
+function paintWorld() {
+  if (ovCv.width !== cv.width || ovCv.height !== cv.height) { ovCv.width = cv.width; ovCv.height = cv.height; }
+  const ctx = ovCv.getContext('2d');
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, ovCv.width, ovCv.height);
+  ctx.setTransform(cv._scale, 0, 0, cv._scale, 0, 0);
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.globalAlpha = 1;
+  for (const L of world.lakes) paintLake(ctx, L);
+  for (const f of world.fields) paintField(ctx, f);
+  for (const pts of world.roads) paintRoad(ctx, pts);
+  paintContinentRivers(ctx, world.rivers);
+  for (const b of world.bridges) paintBridge(ctx, b);
+  for (const g of world.glyphs) PAINT[g.k](ctx, g);
+  for (const t of world.towns) paintTown(ctx, t);
+  for (const R of world.roses) paintRose(ctx, R);
+  for (const L of world.labels) paintLabel(ctx, L);
+}
+
+/* ---- Two canvas textures: B is the current one, A is the previous one (they swap in patches when icons move) ---- */
+const ovTex = [null, null];
+let ovA = 1, ovB = 0, ovSame = true, worldMs = 0;
+function uploadOverlay(i) {
+  if (!ovTex[i]) ovTex[i] = gl.createTexture();
+  gl.activeTexture(gl.TEXTURE6); gl.bindTexture(gl.TEXTURE_2D, ovTex[i]);
+  gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, ovCv);
+  gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+}
+function renderWorld() {
+  const t0 = performance.now();
+  world = planWorld(world);
+  paintWorld();
+  [ovA, ovB] = [ovB, ovA];
+  uploadOverlay(ovB);
+  if (!ovTex[ovA]) {                                        // The first time, the old texture is empty (1×1 and fully transparent, so a read outside the picture is 0) and mountains, trees, and letters bloom in by patches
+    ovTex[ovA] = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, ovTex[ovA]);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4));
+  }
+  ovSame = false;
+  cacheOK = false;
+  worldMs = performance.now() - t0;
+}
+// When the canvas size changes (a share is drawn at another resolution): redraw the same layout at the new size, with no crossfade
+function renderLabels() {
+  if (!world) return;
+  paintWorld(); uploadOverlay(ovB); ovSame = true; cacheOK = false;
+}
+function stepWorld(dt) {
+  if (worldHold || !FB) return;
+  if (!world || world.fb !== FB || world.W !== W || world.H !== H) renderWorld();
+  else if (world.shipN !== (P.ships | 0)) planShips(world, world);
+  for (const s of world.ships) {
+    if (s.delay > 0) { s.delay -= dt; continue; }
+    s.a = s.want ? Math.min(1, s.a + dt / 0.9) : Math.max(0, s.a - dt / 0.5);
+  }
+  world.ships = world.ships.filter(s => s.want || s.a > 0);
+  stepContinentTrade(dt, world);
+}
+
+/* ---- The small ship picture: a three-masted ship, bow to the right (mirror it when it sails left) ---- */
+let shipTex = null;
+const shipBuf = new Float32Array(16);
+function makeShipTex() {
+  const S = 192, c = document.createElement('canvas'); c.width = c.height = S;
+  const x = c.getContext('2d');
+  x.scale(S / 48, S / 48); x.lineCap = 'round'; x.lineJoin = 'round';
+  const fillR = () => { x.fillStyle = RED; x.fill(); };
+  const strokeB = lw => { x.strokeStyle = BLUE; x.lineWidth = lw; x.stroke(); };
+  // Masts (drawn first; sails cover them and leave only the stretch between sails) and the bowsprit
+  x.beginPath(); x.moveTo(23, 29); x.lineTo(23, 4.5); x.moveTo(32.5, 29.3); x.lineTo(32.5, 9.5); x.moveTo(13.5, 25); x.lineTo(13.5, 11);
+  x.moveTo(41.5, 27.5); x.lineTo(47, 22.5); strokeB(0.9);
+  // Square sails, bellied toward the bow
+  const sail = (mx, a, b, hw) => {
+    x.beginPath(); x.moveTo(mx - hw, a); x.quadraticCurveTo(mx, a - 1, mx + hw, a);
+    x.quadraticCurveTo(mx + hw + 2.6, (a + b) / 2, mx + hw - 0.4, b); x.quadraticCurveTo(mx, b + 1.6, mx - hw + 0.4, b);
+    x.quadraticCurveTo(mx - hw + 2.2, (a + b) / 2, mx - hw, a); x.closePath(); fillR(); strokeB(0.85);
+  };
+  sail(23, 7, 14.5, 6); sail(23, 16, 25, 7.6); sail(32.5, 11.5, 17.5, 5); sail(32.5, 19, 26.5, 6.4);
+  x.beginPath(); x.moveTo(13.5, 12); x.quadraticCurveTo(18.5, 18, 18.5, 23.5); x.lineTo(13.5, 23.5); x.closePath(); fillR(); strokeB(0.85);   // Mizzen staysail
+  x.beginPath(); x.moveTo(33.5, 10.5); x.lineTo(46, 23); x.quadraticCurveTo(39, 22.5, 34, 26); x.closePath(); fillR(); strokeB(0.85);       // Headsail
+  // Pennant
+  x.beginPath(); x.moveTo(23, 4.5); x.lineTo(28.5, 3.6); x.lineTo(26.6, 5.1); x.lineTo(28.5, 6.6); x.lineTo(23, 6.3); x.closePath(); x.fillStyle = BLUE; x.fill();
+  // Hull: high stern, raised bow, lower half filled dark, one line along the gunwale
+  x.beginPath(); x.moveTo(6.5, 23.5); x.lineTo(13.8, 24.6); x.lineTo(14, 28.4); x.lineTo(36, 29.4); x.lineTo(42.8, 26.6);
+  x.quadraticCurveTo(40.8, 36.6, 34, 37.7); x.lineTo(15, 37.7); x.quadraticCurveTo(8, 36.4, 6.5, 23.5); x.closePath();
+  fillR();
+  x.save(); x.clip();
+  x.fillStyle = BLUE; x.globalAlpha = 0.6; x.fillRect(0, 33.4, 48, 8); x.globalAlpha = 1;
+  x.beginPath(); x.moveTo(5, 31.6); x.lineTo(44, 31.2); strokeB(0.7);
+  x.restore();
+  strokeB(1.1);
+  // Spray under the hull
+  x.beginPath(); for (const [cx, hw] of [[9.5, 3], [17, 4], [30, 4], [39.5, 3]]) { x.moveTo(cx - hw, 39.8); x.quadraticCurveTo(cx, 38.2, cx + hw, 39.8); } strokeB(0.7);
+  shipTex = gl.createTexture();
+  gl.activeTexture(gl.TEXTURE4); gl.bindTexture(gl.TEXTURE_2D, shipTex);
+  gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, c);
+  gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+  gl.generateMipmap(gl.TEXTURE_2D);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+}
+function packShips() {
+  let n = 0;
+  if (world) for (const s of world.ships) {
+    if (n >= 4) break;
+    if (s.a <= 0) continue;
+    shipBuf[n * 4] = s.x; shipBuf[n * 4 + 1] = s.y; shipBuf[n * 4 + 2] = s.dir * s.a; shipBuf[n * 4 + 3] = s.ph;
+    n++;
+  }
+  return n;
+}
+
+/* ======================================================================
+   Desktop icons (DOM)
+   ====================================================================== */
+const desktop = document.getElementById('desktop');
+let icons = [], layoutKind = 'mine', selected = null, drag = null, extraIdx = 0, layoutCapacity = 0;
+const grid = { cols: 1, rows: 1 };
+let DW = innerWidth, DH = innerHeight - TASKBAR;
+const ripples = [];
+function computeGrid() {
+  DW = innerWidth; DH = innerHeight - TASKBAR;
+  grid.cols = Math.max(1, Math.floor((DW - GRID_X0) / CELL_W));
+  grid.rows = Math.max(1, Math.floor((DH - GRID_Y0) / CELL_H));
+}
+const cellPos = (c, r) => ({ x: GRID_X0 + c * CELL_W, y: GRID_Y0 + r * CELL_H });
+const occupied = (x, y, self) => icons.some(ic => ic !== self && Math.abs(ic.x - x) < CELL_W / 2 && Math.abs(ic.y - y) < CELL_H / 2);
+function nearestFreeCell(cx, cy, self) {
+  let best = null, bd = Infinity;
+  for (let c = 0; c < grid.cols; c++) for (let r = 0; r < grid.rows; r++) {
+    const pos = cellPos(c, r);
+    if (occupied(pos.x, pos.y, self)) continue;
+    const dd = Math.hypot(pos.x + CELL_W / 2 - cx, pos.y + CELL_H / 2 - cy);
+    if (dd < bd) { bd = dd; best = pos; }
+  }
+  return best;
+}
+const isWater = (x, y) => curS(x, y) < 0;
+function addRipple(x, y, str = 1) {
+  ripples.push({ x, y, t0: performance.now(), str });
+  if (ripples.length > 6) ripples.shift();
+}
+function addIcon([name, type], pos, born = false) {
+  const el = document.createElement('div');
+  el.className = 'icon' + (born ? ' born' : '');
+  el.innerHTML = `<div class="glyph"><svg viewBox="0 0 48 48">${glyphOf(name, type)}</svg></div><div class="label">${name}</div>`;
+  el.style.left = pos.x + 'px'; el.style.top = pos.y + 'px';
+  desktop.appendChild(el);
+  const ic = { name, type, x: pos.x, y: pos.y, w: el.offsetWidth, h: el.offsetHeight, el };
+  icons.push(ic); bindDrag(ic);
+  return ic;
+}
+function setPos(ic, x, y) { ic.x = x; ic.y = y; ic.el.style.left = x + 'px'; ic.el.style.top = y + 'px'; }
+function select(ic) {
+  if (selected) selected.el.classList.remove('sel');
+  selected = ic;
+  if (ic) ic.el.classList.add('sel');
+}
+function bindDrag(ic) {
+  const el = ic.el;
+  el.addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
+    e.stopPropagation(); select(ic);
+    el.setPointerCapture(e.pointerId); el.classList.remove('settle');
+    drag = { ic, sx: e.clientX, sy: e.clientY, ox: ic.x, oy: ic.y, moved: false };
+  });
+  el.addEventListener('pointermove', e => {
+    if (!drag || drag.ic !== ic) return;
+    const dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
+    if (!drag.moved && Math.hypot(dx, dy) < 4) return;
+    drag.moved = true; el.classList.add('drag');
+    el.style.left = drag.ox + dx + 'px'; el.style.top = drag.oy + dy + 'px';
+  });
+  const end = (e, cancel) => {
+    if (!drag || drag.ic !== ic) return;
+    const d = drag; drag = null;
+    el.classList.remove('drag');
+    if (!d.moved) return;
+    let nx = cancel ? d.ox : d.ox + (e.clientX - d.sx), ny = cancel ? d.oy : d.oy + (e.clientY - d.sy);
+    nx = Math.min(Math.max(nx, 0), DW - ic.w); ny = Math.min(Math.max(ny, 0), DH - ic.h);
+    if (P.snap && !cancel) { const c = nearestFreeCell(nx + ic.w / 2, ny + ic.h / 2, ic); if (c) { nx = c.x; ny = c.y; } }
+    if (Math.hypot(nx - d.ox, ny - d.oy) < 0.5) { setPos(ic, nx, ny); return; }
+    const cx = nx + ic.w / 2, cy = ny + ic.h / 2;
+    if (isWater(cx, cy)) addRipple(cx, cy, 1.3);
+    el.classList.add('settle'); setPos(ic, nx, ny);
+    commit();
+  };
+  el.addEventListener('pointerup', e => end(e, false));
+  el.addEventListener('pointercancel', e => end(e, true));
+}
+function mulberry32(a) {
+  return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+}
+function applyLayout(kind) {
+  layoutKind = kind;
+  icons.forEach(ic => ic.el.remove()); icons = []; selected = null; extraIdx = 0;
+  computeGrid();
+  layoutCapacity = grid.cols * grid.rows;
+  if (kind === 'mine') {
+    for (const [c, r, name, type] of mineCells()) {
+      const pos = cellPos(Math.round(c * (grid.cols - 1) / 21), Math.round(r * (grid.rows - 1) / 9));
+      if (!occupied(pos.x, pos.y, null)) addIcon([name, type], pos);
+    }
+  } else if (kind === 'arranged') {
+    FILES.forEach((f, i) => { const c = Math.floor(i / grid.rows), r = i % grid.rows; if (c < grid.cols) addIcon(f, cellPos(c, r)); });
+  } else if (kind === 'messy') {
+    const rnd = mulberry32(20260928);
+    for (const f of FILES) for (let t = 0; t < 300; t++) {
+      const c = rnd() < 0.45 ? Math.floor(rnd() * Math.min(3, grid.cols)) : Math.floor(rnd() * grid.cols);
+      const pos = cellPos(c, Math.floor(rnd() * grid.rows));
+      if (!occupied(pos.x, pos.y, null)) { addIcon(f, pos); break; }
+    }
+  } else {
+    Array.from({ length: 10 }, (_, r) => [[0, r], [1, r]]).flat().concat([[2, 0], [2, 1], [2, 2], [3, 0], [3, 1], [3, 2], [Math.floor(grid.cols * 0.45), Math.floor(grid.rows * 0.5)]])
+      .forEach(([c, r], i) => addIcon(FILES[i], cellPos(Math.min(c, grid.cols - 1), Math.min(r, grid.rows - 1))));
+  }
+  commit(true);
+}
+
+/* ======================================================================
+   Size and main loop
+   ====================================================================== */
+function resize() {
+  W = innerWidth; H = innerHeight;
+  // Preview mode: the page is laid out at full desktop size, then shown scaled down, so the canvas only needs a low resolution
+  const scale = PREVIEW ? 0.45 : Math.min(devicePixelRatio || 1, P.quality);
+  // Use the box the canvas actually occupies, fractions included (a 2560-wide screen at 150% scale is 1706.67, while innerWidth rounds that to 1707).
+  // Otherwise the canvas is one pixel larger than the screen, and the browser scales the whole picture to fit, which blurs it
+  const box = cv.getBoundingClientRect();
+  cv.width = Math.round((box.width || W) * scale); cv.height = Math.round((box.height || H) * scale); cv._scale = scale;
+  Gw = Math.ceil(W / STEP) + 2; Gh = Math.ceil(H / STEP) + 2;
+  buildNoise();
+  allocField();
+}
+
+const T0 = performance.now();
+let lastT = 0, fpsEMA = 0, frameN = 0, frameMs = 0;
+const px = new Uint8Array(4);
+let paused = false;                              // Host notice: a foreground window is maximized or fullscreen, so pause
+function frame(now) {
+  requestAnimationFrame(frame);
+  if (paused) { lastT = 0; return; }
+  if (P.cap30 && now - lastT < 31) return;
+  const dt = lastT ? Math.min((now - lastT) / 1000, 0.1) : 0.03;
+  if (PROTOTYPE_STATS && lastT) fpsEMA = fpsEMA ? fpsEMA * 0.9 + (1 / dt) * 0.1 : 1 / dt;
+  lastT = now;
+  const e = Math.min((now - morphT0) / morphDur, 1);
+  curMix = e < 0.5 ? 2 * e * e : 1 - Math.pow(-2 * e + 2, 2) / 2;
+  stepWorld(dt);
+  draw(now);
+  if (++frameN % 10 === 0 && PROTOTYPE_STATS) updateStats();
+}
+function draw(now) {
+  const { p, U } = PR;
+  gl.useProgram(p);
+  gl.viewport(0, 0, cv.width, cv.height);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, noiseTex);
+  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, ftex[fromI]);
+  gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, ftex[toI]);
+  gl.uniform1i(U.uNoise, 0); gl.uniform1i(U.uFA, 1); gl.uniform1i(U.uFB, 2);
+  gl.uniform2f(U.uRes, cv.width / cv._scale, cv.height / cv._scale);   // Line up with the canvas device pixels (innerWidth and innerHeight are already rounded)
+  gl.uniform2f(U.uGrid, Gw, Gh);
+  gl.uniform1f(U.uScale, cv._scale);
+  gl.uniform1f(U.uSeed, (seed % 997) * 0.37);
+  gl.uniform1f(U.uStep, STEP);
+  gl.uniform1f(U.uMix, curMix);
+  gl.uniform1f(U.uTime, (now - T0) / 1000);
+  gl.uniform1f(U.uDebug, P.debug ? 1 : 0);
+  gl.activeTexture(gl.TEXTURE6); gl.bindTexture(gl.TEXTURE_2D, ovTex[ovA]); gl.uniform1i(U.uOvA, 6);
+  gl.activeTexture(gl.TEXTURE7); gl.bindTexture(gl.TEXTURE_2D, ovTex[ovB]); gl.uniform1i(U.uOvB, 7);
+  gl.uniform1f(U.uOvMix, ovSame ? 1 : curMix); gl.uniform2f(U.uCv, cv.width, cv.height);
+  const rs = world ? world.roses : [];
+  gl.uniform3fv(U.uRose, [0, 1].flatMap(i => rs[i] ? [rs[i].x, rs[i].y, rs[i].r] : [0, 0, 0]));
+  gl.activeTexture(gl.TEXTURE4); gl.bindTexture(gl.TEXTURE_2D, shipTex); gl.uniform1i(U.uShipTex, 4);
+  gl.uniform1f(U.uShipN, packShips()); gl.uniform4fv(U.uShip, shipBuf);
+  ensureCache();
+  const dirty = !cacheOK || curMix < 1 || P.debug !== cacheDebug;
+  const measure = PROTOTYPE_STATS && frameN % 20 === 0, t0 = measure ? performance.now() : 0;
+  gl.uniform1i(U.uCache, 5);
+  if (dirty) {
+    gl.activeTexture(gl.TEXTURE5); gl.bindTexture(gl.TEXTURE_2D, null);   // Do not read the cache while drawing into it
+    gl.bindFramebuffer(gl.FRAMEBUFFER, cacheFB);
+    gl.uniform1f(U.uPass, 0);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    cacheOK = true; cacheDebug = P.debug;
+  }
+  gl.activeTexture(gl.TEXTURE5); gl.bindTexture(gl.TEXTURE_2D, cacheTex);
+  gl.uniform1f(U.uPass, 1);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  drawContinentTrade();
+  if (measure) { gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); frameMs = performance.now() - t0; }
+}
+
+/* ======================================================================
+   Panel
+   ====================================================================== */
+const statsEl = document.getElementById('stats');
+const GPU = (() => {
+  const ext = gl.getExtension('WEBGL_debug_renderer_info');
+  const name = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
+  return name.replace(/^ANGLE \([^,]+,\s*/, '').replace(/\s*\(0x[0-9a-f]+\).*$/i, '')
+    .replace(/\s*(Direct3D|vs_|OpenGL).*$/, '').replace(/\(R\)|\(TM\)/g, '').trim();
+})();
+function updateStats() {
+  statsEl.innerHTML =
+    `<span class="live">● Animating · ${fpsEMA.toFixed(0)} fps</span><br>GPU ${GPU}<br>` +
+    `Frame ${frameMs.toFixed(1)} ms · Field ${fieldMs.toFixed(0)} ms · Map ${worldMs.toFixed(0)} ms<br>` +
+    `Canvas ${cv.width}×${cv.height} · Icons ${icons.length}`;
+}
+function syncPanel() {
+  document.querySelectorAll('.seg button').forEach(b => b.classList.toggle('on', b.dataset.v === layoutKind));
+  document.querySelectorAll('.toggles input').forEach(inp => { inp.checked = P[inp.dataset.key]; });
+}
+const slidersEl = document.getElementById('sliders');
+for (const s of SLIDERS) {
+  const wrap = document.createElement('div');
+  wrap.className = 'slider';
+  wrap.innerHTML = `<div class="row"><span>${s.label}</span><span></span></div><input type="range" min="${s.min}" max="${s.max}" step="${s.step}" value="${P[s.key]}">`;
+  const out = wrap.querySelector('.row span:last-child'), inp = wrap.querySelector('input');
+  out.textContent = s.fmt(P[s.key]);
+  inp.addEventListener('input', () => {
+    P[s.key] = +inp.value; out.textContent = s.fmt(P[s.key]);
+    if (s.act === 'field') refresh();
+    else if (s.act === 'size') { resize(); refresh(); }
+  });
+  slidersEl.appendChild(wrap);
+}
+document.querySelector('.seg').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  applyLayout(b.dataset.v); syncPanel();
+});
+document.querySelectorAll('.toggles input').forEach(inp => inp.addEventListener('change', () => {
+  P[inp.dataset.key] = inp.checked;
+}));
+document.getElementById('collapse').addEventListener('click', () => {
+  const p = document.getElementById('panel');
+  p.classList.toggle('collapsed');
+  document.getElementById('collapse').textContent = p.classList.contains('collapsed') ? '+' : '–';
+});
+// New map: a new seed (Refresh in the settings window, and New map on the panel). If icon positions are already known, play the opening again from the start.
+// If wallpaper or preview has just opened and positions are still unknown, only store the seed, and draw with it once the icons arrive
+let iconsSeen = !(WALL || PREVIEW);
+function reseed(v) {
+  seed = v; buildNoise();
+  if (!iconsSeen) return;
+  if (ovTex[ovB]) { gl.deleteTexture(ovTex[ovB]); ovTex[ovB] = null; }   // Land art blooms again from a blank sheet, and the sea spreads out again
+  commit(true);
+}
+document.getElementById('btnSeed').addEventListener('click', () => reseed((Math.random() * 1e6) | 0));
+document.getElementById('btnAdd').addEventListener('click', () => {
+  const f = EXTRA[extraIdx++ % EXTRA.length];
+  let pos = null;
+  for (let t = 0; t < 300 && !pos; t++) {
+    const c = cellPos(Math.floor(Math.random() * grid.cols), Math.floor(Math.random() * grid.rows));
+    if (!occupied(c.x, c.y, null)) pos = c;
+  }
+  if (!pos) return;
+  const ic = addIcon(f, pos, true);
+  select(ic);
+  if (isWater(pos.x + ic.w / 2, pos.y + ic.h / 2)) addRipple(pos.x + ic.w / 2, pos.y + ic.h / 2, 1.3);
+  commit();
+});
+desktop.addEventListener('pointerdown', e => {
+  select(null);
+  if (isWater(e.clientX, e.clientY)) addRipple(e.clientX, e.clientY);
+});
+addEventListener('keydown', e => {
+  if ((e.key === 'Delete' || e.key === 'Backspace') && selected) {
+    const ic = selected; select(null); ic.el.remove(); icons = icons.filter(x => x !== ic); commit();
+  } else if (e.key === 'h' || e.key === 'H') document.getElementById('panel').classList.toggle('hidden');
+});
+let resizeT = 0;
+addEventListener('resize', () => {
+  clearTimeout(resizeT);
+  resizeT = setTimeout(() => {
+    if (WALL || PREVIEW) { resize(); refresh(); return; }
+    resize(); computeGrid();
+    if (grid.cols * grid.rows > layoutCapacity && layoutCapacity < 40) { applyLayout(layoutKind); syncPanel(); return; }
+    for (const ic of icons) setPos(ic, Math.min(ic.x, Math.max(0, DW - ic.w)), Math.min(ic.y, Math.max(0, DH - ic.h)));
+    refresh();
+  }, 100);
+});
+function tickClock() {
+  const d = new Date(), z = n => String(n).padStart(2, '0');
+  document.getElementById('clock').innerHTML = `${z(d.getHours())}:${z(d.getMinutes())}<br>${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
+}
+setInterval(tickClock, 15000); tickClock();
+
+/* ---------- Startup ---------- */
+window.__dbg = {
+  P, applyLayout,
+  bench() {
+    const ts = [];
+    for (let i = 0; i < 10; i++) { const a = performance.now(); draw(performance.now()); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); ts.push(performance.now() - a); }
+    ts.sort((a, b) => a - b);
+    return { frame: +ts[5].toFixed(1), canvas: cv.width + 'x' + cv.height, gpu: GPU };
+  },
+};
+resize();
+buildNoiseTex();
+makeShipTex();
+if (WALL || PREVIEW) startHostedMode();
+else { applyLayout('mine'); syncPanel(); }
+requestAnimationFrame(frame);
+
+/* ======================================================================
+   Hosted mode: the picture is driven from outside
+   - Wallpaper mode (?wallpaper=1): the desktop host host/Deskland.exe sends messages through WebView2
+   - Preview mode (?preview=1): the settings window (settings.html) sends messages through iframe postMessage
+   Messages: icons (real icon rectangles, physical pixels) / settings (parameters, a partial update) / reset (restore defaults) / pause
+   ====================================================================== */
+// Apply settings: accept only parameters that are on the panel. Sea size rebuilds the field (if the ship count changed, the next frame places the ships again)
+function applySettings(v) {
+  if (typeof v.seed === 'number' && v.seed !== seed) reseed(v.seed);   // Refresh in the settings window: a new map (the desktop and the preview share one seed)
+  let field = false;
+  for (const k in v) {
+    if (!SLIDERS.some(s => s.key === k) || typeof v[k] !== typeof P[k] || P[k] === v[k]) continue;
+    P[k] = k === 'wagons' ? (Number.isFinite(v[k]) ? Math.max(0, Math.min(8, Math.round(v[k]))) : DEFAULTS.wagons) : v[k];
+    if (k === 'sigma') field = true;
+  }
+  if (field && FB) refresh();
+
+}
+
+function drawGhosts() {
+  const box = document.getElementById('ghosts');
+  box.innerHTML = icons.map(ic => `<div class="ghost" style="left:${ic.x}px;top:${ic.y}px;width:${ic.w}px;height:${ic.h}px"><i></i><b></b></div>`).join('');
+}
+
+function startHostedMode() {
+  document.body.classList.add('wall');
+  if (PREVIEW) {
+    document.body.classList.add('preview');
+    const g = document.createElement('div'); g.id = 'ghosts'; document.body.appendChild(g);
+  }
+  icons = [];
+  commit(true);                                   // Start as one sheet of land (icon positions are still unknown, so do not draw mountains, trees, or names yet)
+  let first = true;
+  const handle = m => {
+    if (m.t === 'pause') { paused = PREVIEW ? false : m.v; return; }
+    if (m.t === 'settings') { applySettings(m.v || {}); return; }
+    if (m.t === 'reset') { applySettings(Object.assign({}, DEFAULTS, m.v || {})); return; }
+    if (m.t !== 'icons') return;
+    const k = window.devicePixelRatio || 1;       // Physical pixels to CSS pixels
+    icons = m.vis ? m.r.map(([l, t, r, b]) => ({ x: l / k, y: t / k, w: (r - l) / k, h: (b - t) / k })) : [];
+    if (PREVIEW) drawGhosts();
+    worldHold = false;                            // Icon positions are known, so start drawing what belongs on land
+    iconsSeen = true;
+    commit(first);                                // The first time, the sea spreads out from the icons; after that, the sea follows the icons smoothly
+    first = false;
+  };
+  if (PREVIEW) {
+    addEventListener('message', ev => { if (ev.source === parent) handle(typeof ev.data === 'string' ? JSON.parse(ev.data) : ev.data); });
+    parent.postMessage(JSON.stringify({ t: 'ready' }), '*');
+    return;
+  }
+  const host = window.chrome && window.chrome.webview;
+  if (!host) return;
+  host.addEventListener('message', ev => handle(JSON.parse(ev.data)));
+  host.postMessage('ready');
+}

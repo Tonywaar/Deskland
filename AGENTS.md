@@ -1,19 +1,22 @@
-# Deskland 开源体验版开发指南
+# Deskland Preview development guide
 
-- 用中文与项目负责人沟通。
-- 本仓库包含基础宿主、共用界面与框架、沙滩和草地两个免费主题；其他主题只保留带锁的名称、简介和缩略图，不包含页面、参数、脚本或其他实现代码。
-- 界面只保留简体中文和英文，不跟随主程序增加其他语言。
-- 不提供账号登录、购买恢复或自动检查更新功能，不接入授权服务、官网更新清单或商店更新接口。
-- 保持 `themes.json`、主题参数默认值和中英文文案一致；锁定主题没有 `page` 和 `groups`，点击只打开购买说明，不能切换当前壁纸。
-- 修改主题后检查图标移动、预览、暂停和分享；所有画布按实际像素与小数显示尺寸绘制。
-- 壁纸常驻后台，以核显 30fps 为目标。静态绘图进入缓存，小物体使用局部图层，不在全屏着色器中逐个计算大量物体。
-- `prototype/thumbs/` 是人工设计的缩略图，未经要求不要重新生成或覆盖。
-- 主程序：`powershell -ExecutionPolicy Bypass -File host\build.ps1`；产物 `host/bin/Deskland.exe`。
-- 浏览器预览：`node prototype\serve.mjs`，访问 `http://localhost:5178/settings.html`。
-- Windows 宿主：`host/DesktopHost.cs`；改主题 HTML/JS 不需要重新编译宿主，托盘“重新载入”即可。
-- 产品显示名为 `Deskland Preview`；程序读写 `%LOCALAPPDATA%\DesklandPreview`，安装到 `Programs\Deskland Preview`，启动项和运行实例标识也与开发版分开，不要改回共用身份。
-- 不提交 `host/bin/`、`host/lib/`、个人数据、凭证或本机路径。
-- 发布或修改商标相关内容前须获得项目负责人的明确指示。
-- 许可见 `LICENSE`，名称和图标的说明见 `TRADEMARKS.md`。
-- 2026-11-06：已发布 GitHub Release `v0.1.2`，包含 Windows x64 安装包、对应源码 ZIP、SHA256 和文件清单；README 提供最新 Release 下载入口。仓库已公开，安装包未签名。
-- 2026-11-07：本地0.1.3同步启动与缩略图修复：壁纸不抢占前台并排除自身、不可见及 cloaked 窗口，沙滩在暂停与首次图标消息相邻到达时仍完成地形；设置页按版本刷新缓存，13张缩略图以内嵌 data URI 和真实 `<img>` 显示，容器 `width:100%`。真实 Preview 宿主验证13图均解码且宽约211px、高112px，暂停注入后沙滩完成、恢复后帧数增长。安装包43个文件且不含马尔代夫源码，SHA256 `e253cad56f1ea0ee2fb9d13ebe8a44f7dbe7232a506ba752cbe54c939c17bf44`；GitHub Release `v0.1.3` 已发布安装包、对应源码ZIP、SHA256和43文件清单，远端资产哈希核对一致，`releases/latest` 已指向0.1.3。缓存 NSIS ZIP 校验失败，构建复用正式版仓库已验证的 NSIS 3.13 编译器。
+- Communicate with the project owner in English.
+- This repository contains the base host, the shared UI and framework, and eight free ready themes: `beach`, `meadow`, `meadow-night`, `beach-night`, `worldmap`, `worldmap-dark`, `forest`, and `forest-night`. Locked themes stay in the catalog for the installer guard, but the settings list hides them. They have no page, parameters, scripts, or other implementation.
+- The app UI, comments, and docs are English only. There is no zh-CN locale. Do not add other languages to match the main program.
+- Do not add account sign-in, purchase restore, or automatic update checks. Do not connect to a license service, the website update manifest, or a store update API.
+- Keep `themes.json`, theme parameter defaults, and the English copy consistent. Strings in `themes.json` are English. Locked themes have no `page` and no `groups`. A click only opens the purchase note and must not switch the current wallpaper.
+- `worldmap` (Old Map) is a free ready theme with page `worldmap.html`. It is the same parchment map as the deskland.app/demo/worldmap prototype: icons become sea, towns are linked by dotted roads, and wagons and ships travel on the map. Public params: `sigma` (sea size, 50–200, default 80), `ships` (0–3, default 2), `wagons` (0–8, default 5).
+- `forest` (Forest) is a free ready theme with page `forest.html`. It is the same gouache woods as the deskland.app/demo/forest prototype: icons sit in a clearing, trees fill the rest and sway, and birds stay in the woods. Public params: `sigma` (clearing size, 40–200, default 85), `wind` (0–3, default 1), `birds` (0–12, default 5). `forest-night` uses the same page with `night=1` and no moon disc.
+- `worldmap-dark` uses `worldmap.html` with `dark=1`: the same chart on dark paper with pale ink, and no moon disc.
+- After changing a theme, check icon movement, preview, pause, and sharing. Draw every canvas using real pixels and fractional display sizes.
+- The wallpaper stays resident in the background and targets 30 fps on integrated graphics. Put static drawing in a cache. Use a local layer for small objects. Do not evaluate large numbers of objects one by one inside the fullscreen shader.
+- `prototype/thumbs/` holds hand-made thumbnails. Do not regenerate or overwrite them unless asked.
+- Main program: `powershell -ExecutionPolicy Bypass -File host\build.ps1`. Output: `host/bin/Deskland.exe`.
+- Browser preview: `node prototype\serve.mjs`, then open `http://localhost:5178/settings.html`.
+- Windows host: `host/DesktopHost.cs`. Theme HTML/JS changes do not need a host rebuild. Use tray "Reload".
+- The product display name is `Deskland Preview`. The program reads and writes `%LOCALAPPDATA%\DesklandPreview`, installs to `Programs\Deskland Preview`, and keeps its startup entry and running-instance identity separate from the development build. Do not point them back at a shared identity.
+- Do not commit `host/bin/`, `host/lib/`, personal data, credentials, or machine-local paths.
+- Get explicit approval from the project owner before publishing or changing trademark-related content.
+- The license is `LICENSE`. Name and icon notes are in `TRADEMARKS.md`.
+- 2026-11-06: GitHub Release `v0.1.2` is published. It includes the Windows x64 installer, the matching source ZIP, SHA256 checksums, and a file list. The README links to the latest Release download. The repository is public. The installer is unsigned.
+- 2026-11-07: Local 0.1.3 startup and thumbnail fixes. The wallpaper does not take the foreground, and it excludes its own window, invisible windows, and cloaked windows. Beach still finishes its terrain when pause and the first icon message arrive close together. The settings page refreshes its cache by version. All 13 thumbnails render as embedded data URIs and real `<img>` elements, with the container at `width:100%`. A real Preview host check showed all 13 images decode at about 211 px wide and 112 px tall. After a pause injection, Beach finishes; after resume, the frame count increases. The installer contains 43 files and does not include Maldives source. SHA256 `e253cad56f1ea0ee2fb9d13ebe8a44f7dbe7232a506ba752cbe54c939c17bf44`. GitHub Release `v0.1.3` includes the installer, the matching source ZIP, the SHA256 checksum, and the 43-file list. Remote asset hashes matched. `releases/latest` points to 0.1.3. The cached NSIS ZIP failed checksum verification, so the build reused the NSIS 3.13 compiler already verified in the Wallpaper edition repository.
